@@ -9,10 +9,10 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.soubhagya</groupId>
-	<artifactId>policypulse</artifactId>
+	<artifactId>policy-impact-engine</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
-	<description/>
+	<name>Policy Impact Engine</name>
+	<description>Policy Impact Engine - backend service for tracking and analyzing policy impact</description>
 	<url/>
 	<licenses>
 		<license/>

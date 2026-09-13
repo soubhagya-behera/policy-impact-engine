@@ -1,10 +1,10 @@
-package com.soubhagya.policypulse;
+package com.soubhagya.policyimpactengine;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class PolicypulseApplicationTests {
+class PolicyImpactEngineApplicationTests {
 
 	@Test
 	void contextLoads() {

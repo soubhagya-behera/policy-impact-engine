@@ -1,13 +1,13 @@
-package com.soubhagya.policypulse;
+package com.soubhagya.policyimpactengine;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class PolicypulseApplication {
+public class PolicyImpactEngineApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(PolicypulseApplication.class, args);
+		SpringApplication.run(PolicyImpactEngineApplication.class, args);
 	}
 
 }
