@@ -76,9 +76,15 @@ Completed (Phase 2C — Response Size Limits):
 - Oversized responses fail with PolicyFetchException (no partial content, no silent truncation)
 - HttpPolicyFetcherSizeLimitTest (7 deterministic local-HttpServer tests: below/at/above limit, Content-Length rejection, chunked rejection, multibyte byte-counting, no-partial-content)
 
+Completed (Phase 2D — HTML Extraction):
+- Jsoup 1.23.2 production dependency (current stable, Java 17 compatible)
+- PolicyContentExtractor abstraction (single extract method, plain Java, no DB/security/HTTP/user coupling)
+- JsoupPolicyContentExtractor (lenient parse, script/style removal, body-only leaf-block lines in document order, entities decoded, null/blank/malformed safe, deterministic; no normalization)
+- JsoupPolicyContentExtractorTest (8 deterministic inline-fixture tests, no network)
+- HttpPolicyFetcher behavior unchanged (SSRF, Redirect.NEVER, size limit, timeouts, status handling)
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
-- Jsoup / HTML extraction
 - Text normalization
 - SHA-256 / SimHash
 - PolicyVersion / versioning
@@ -118,7 +124,12 @@ Phase 2C — Response Size Limits is DONE:
 - HttpPolicyFetcherSizeLimitTest (below/at/above limit, Content-Length, chunked, multibyte, no-partial-content) — DONE
 - Existing SSRF/HTTP status/timeout behavior preserved — DONE (115 tests passing)
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, Jsoup, extraction, normalization).
+Phase 2D — HTML Extraction is DONE:
+- Jsoup 1.23.2 + PolicyContentExtractor/JsoupPolicyContentExtractor — DONE
+- JsoupPolicyContentExtractorTest (basic, headings/paragraphs, script/style, links, malformed, empty, entities, realistic fixture) — DONE
+- HttpPolicyFetcher behavior unchanged — DONE (123 tests passing)
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, normalization).
 
 ## Current Status
 
@@ -158,10 +169,15 @@ Phase 2C slice implemented and tested successfully
 streaming read via BodyHandlers.ofInputStream(), HttpPolicyFetcherSizeLimitTest —
 deterministic local tests without external network — 115 tests passing).
 
+Phase 2D slice implemented and tested successfully
+(Jsoup 1.23.2, PolicyContentExtractor + JsoupPolicyContentExtractor with
+JsoupPolicyContentExtractorTest — deterministic inline-fixture tests without
+network, HttpPolicyFetcher untouched — 123 tests passing).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 ## Next Action
 
-The next implementation task is the next Phase 2 slice (redirect revalidation / Jsoup /
-extraction / normalization), as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2D without explicit instruction.
+The next implementation task is the next Phase 2 slice (redirect revalidation /
+normalization), as scoped in ARCHITECTURE.md §31.
+Do not begin Phase 2E without explicit instruction.
