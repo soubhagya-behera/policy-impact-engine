@@ -45,17 +45,17 @@ The database name `policypulse` is retained intentionally. No rename is planned 
 Status: IN PROGRESS**
 
 Completed:
-- Policy database migration
+- Policy persistence foundation
 - Policy entity
 - Policy repository
 - Policy registration DTOs
 - URL validation
+- Policy service
 
 Remaining:
-- Policy service
 - Policy controller
 - RFC 7807/global exception handling
-- remaining Phase 1 tests
+- remaining Phase 1 integration tests
 
 ## Next Phase
 
@@ -70,7 +70,7 @@ Phase 1 scope (foundation slice done; remainder not started):
 - Testcontainers PostgreSQL repository tests — DONE (foundation slice)
 - Policy registration DTOs — DONE
 - URL validation — DONE (registration-time syntactic rules; network-level SSRF checks belong to the fetch phase)
-- Policy service — not started
+- Policy service — DONE (registration + retrieval, mocked unit tests)
 - Policy controller — not started
 - Global exception handling / RFC 7807 — not started
 - remaining Phase 1 tests — not started
@@ -84,13 +84,16 @@ Testcontainers repository tests passing).
 Phase 1B slice implemented and tested successfully
 (registration DTOs, deterministic URL validation with unit tests).
 
-No Phase 1 service, controller, or exception-handling
+Phase 1C slice implemented and tested successfully
+(policy service with mocked unit tests).
+
+No Phase 1 controller or exception-handling
 work has been started.
 
 ## Next Action
 
 The next implementation task is the remainder of Phase 1 — Policy Registration:
-Policy service, controller, and global RFC 7807
+Policy controller and global RFC 7807
 exception handling with their tests, as scoped in ARCHITECTURE.md §31.
-The persistence foundation, registration DTOs, and URL validation
-are already in place.
+The persistence foundation, registration DTOs, URL validation,
+and policy service are already in place.
