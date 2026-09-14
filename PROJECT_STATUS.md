@@ -83,9 +83,14 @@ Completed (Phase 2D — HTML Extraction):
 - JsoupPolicyContentExtractorTest (8 deterministic inline-fixture tests, no network)
 - HttpPolicyFetcher behavior unchanged (SSRF, Redirect.NEVER, size limit, timeouts, status handling)
 
+Completed (Phase 2E — Text Normalization):
+- PolicyTextNormalizer abstraction (single normalize method, plain Java, no Spring/DB/HTTP/security/user/clock/randomness)
+- DefaultPolicyTextNormalizer (deterministic/idempotent: null→empty, CRLF/CR→LF, horizontal whitespace collapse, per-line trim, blank-line collapse with paragraph preservation; case/punctuation/wording untouched)
+- DefaultPolicyTextNormalizerTest (14 deterministic inline-string tests, no network/DB)
+- JsoupPolicyContentExtractor and HttpPolicyFetcher unchanged (no extraction/fetch regressions)
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
-- Text normalization
 - SHA-256 / SimHash
 - PolicyVersion / versioning
 - Diff / classification / concepts / impact / recommendations / scheduler / notifications
@@ -129,7 +134,12 @@ Phase 2D — HTML Extraction is DONE:
 - JsoupPolicyContentExtractorTest (basic, headings/paragraphs, script/style, links, malformed, empty, entities, realistic fixture) — DONE
 - HttpPolicyFetcher behavior unchanged — DONE (123 tests passing)
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, normalization).
+Phase 2E — Text Normalization is DONE:
+- PolicyTextNormalizer/DefaultPolicyTextNormalizer — DONE
+- DefaultPolicyTextNormalizerTest (null, empty, whitespace-only, LF/CRLF/CR, trim, space/tab collapse, blank-line collapse, punctuation/case/word-boundary preservation, paragraph separation, idempotence, deterministic fixture) — DONE
+- Extraction and fetch behavior unchanged — DONE (137 tests passing)
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, hashing/versioning and later pipeline stages).
 
 ## Current Status
 
@@ -174,10 +184,15 @@ Phase 2D slice implemented and tested successfully
 JsoupPolicyContentExtractorTest — deterministic inline-fixture tests without
 network, HttpPolicyFetcher untouched — 123 tests passing).
 
+Phase 2E slice implemented and tested successfully
+(PolicyTextNormalizer + DefaultPolicyTextNormalizer with
+DefaultPolicyTextNormalizerTest — deterministic inline-string tests without
+network/DB, extraction and fetch untouched — 137 tests passing).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 ## Next Action
 
 The next implementation task is the next Phase 2 slice (redirect revalidation /
-normalization), as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2E without explicit instruction.
+hashing/versioning and later pipeline stages), as scoped in ARCHITECTURE.md §31.
+Do not begin Phase 2F without explicit instruction.
