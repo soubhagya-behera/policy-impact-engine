@@ -51,9 +51,9 @@ Completed:
 - Policy registration DTOs
 - URL validation
 - Policy service
+- Policy controller
 
 Remaining:
-- Policy controller
 - RFC 7807/global exception handling
 - remaining Phase 1 integration tests
 
@@ -71,7 +71,7 @@ Phase 1 scope (foundation slice done; remainder not started):
 - Policy registration DTOs — DONE
 - URL validation — DONE (registration-time syntactic rules; network-level SSRF checks belong to the fetch phase)
 - Policy service — DONE (registration + retrieval, mocked unit tests)
-- Policy controller — not started
+- Policy controller — DONE (registration/retrieval endpoints, WebMvcTest slice tests)
 - Global exception handling / RFC 7807 — not started
 - remaining Phase 1 tests — not started
 
@@ -87,13 +87,16 @@ Phase 1B slice implemented and tested successfully
 Phase 1C slice implemented and tested successfully
 (policy service with mocked unit tests).
 
-No Phase 1 controller or exception-handling
+Phase 1D slice implemented and tested successfully
+(policy controller with WebMvcTest slice tests).
+
+No Phase 1 exception-handling
 work has been started.
 
 ## Next Action
 
 The next implementation task is the remainder of Phase 1 — Policy Registration:
-Policy controller and global RFC 7807
-exception handling with their tests, as scoped in ARCHITECTURE.md §31.
+global RFC 7807 exception handling with its tests,
+as scoped in ARCHITECTURE.md §31.
 The persistence foundation, registration DTOs, URL validation,
-and policy service are already in place.
+policy service, and policy controller are already in place.
