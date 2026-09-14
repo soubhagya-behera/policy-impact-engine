@@ -42,7 +42,7 @@ The database name `policypulse` is retained intentionally. No rename is planned 
 **Phase 0 — Foundation: COMPLETE**
 
 **Phase 1 — Policy Registration
-Status: IN PROGRESS**
+Status: COMPLETE**
 
 Completed:
 - Policy persistence foundation
@@ -53,15 +53,13 @@ Completed:
 - Policy service
 - Policy controller
 - RFC 7807/global error handling
-
-Remaining:
-- Final Phase 1 integration/acceptance tests
+- Final integration/acceptance tests
 
 ## Next Phase
 
-**Phase 1 — Policy Registration**
+**Phase 2 — Policy Fetching**
 
-Phase 1 scope (foundation slice done; remainder not started):
+Phase 1 is complete. All Phase 1 vertical slices are implemented and tested:
 
 - Policy entity — DONE
 - Policy repository — DONE
@@ -73,7 +71,11 @@ Phase 1 scope (foundation slice done; remainder not started):
 - Policy service — DONE (registration + retrieval, mocked unit tests)
 - Policy controller — DONE (registration/retrieval endpoints, WebMvcTest slice tests)
 - Global exception handling / RFC 7807 — DONE (ProblemDetail, 404/400 mappings, application/problem+json)
-- remaining Phase 1 tests — not started (final integration/acceptance tests)
+- Final integration/acceptance tests — DONE (Testcontainers PostgreSQL end-to-end vertical slice: POST → GET by ID → GET collection, invalid URL and bean validation — application/problem+json, Hibernate validate + Flyway)
+
+Phase 2 will introduce policy fetching (fetcher interface, HTTP/Jsoup implementation,
+SSRF protection, timeouts, response-size limits, readable-content extraction, normalization).
+No Phase 2 functionality has been implemented.
 
 ## Current Status
 
@@ -93,13 +95,15 @@ Phase 1D slice implemented and tested successfully
 Phase 1E slice implemented and tested successfully
 (global RFC 7807 error handling with ProblemDetail and WebMvcTest coverage).
 
-No final Phase 1 integration/acceptance tests
-have been started.
+Phase 1F slice implemented and tested successfully
+(final integration/acceptance tests with Testcontainers PostgreSQL
+exercising Controller → Validation → Service → URL Validator → Repository → PostgreSQL,
+Flyway + Hibernate validate, 49 tests passing).
+
+Phase 1 — Policy Registration is COMPLETE.
 
 ## Next Action
 
-The next implementation task is the final Phase 1 integration/acceptance tests,
+Phase 2 — Policy Fetching is the next implementation task,
 as scoped in ARCHITECTURE.md §31.
-The persistence foundation, registration DTOs, URL validation,
-policy service, policy controller, and global RFC 7807 error handling
-are already in place.
+Do not begin Phase 2 without explicit instruction.

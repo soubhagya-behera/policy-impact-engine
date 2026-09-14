@@ -28,6 +28,10 @@ public class PolicyService {
 	public PolicyResponse register(String name, String url) {
 		String validatedUrl = PolicyUrlValidator.validate(url);
 		Policy saved = repository.save(new Policy(name, validatedUrl));
+		// Flush so that @CreationTimestamp / @UpdateTimestamp are populated
+		// before mapping to the response DTO; without flush the timestamps
+		// remain null in the first transaction flush.
+		repository.flush();
 		return PolicyResponse.from(saved);
 	}
 
