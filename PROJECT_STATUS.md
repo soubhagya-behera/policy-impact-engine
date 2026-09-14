@@ -48,10 +48,10 @@ Completed:
 - Policy database migration
 - Policy entity
 - Policy repository
+- Policy registration DTOs
+- URL validation
 
 Remaining:
-- URL validation
-- DTOs
 - Policy service
 - Policy controller
 - RFC 7807/global exception handling
@@ -68,10 +68,10 @@ Phase 1 scope (foundation slice done; remainder not started):
 - Flyway V1 policy schema — DONE
 - `spring.jpa.hibernate.ddl-auto=validate` — DONE
 - Testcontainers PostgreSQL repository tests — DONE (foundation slice)
+- Policy registration DTOs — DONE
+- URL validation — DONE (registration-time syntactic rules; network-level SSRF checks belong to the fetch phase)
 - Policy service — not started
 - Policy controller — not started
-- URL validation — not started
-- DTOs — not started
 - Global exception handling / RFC 7807 — not started
 - remaining Phase 1 tests — not started
 
@@ -81,13 +81,16 @@ Phase 1 foundation slice implemented and tested successfully
 (Flyway V1 migration, Policy entity, Policy repository,
 Testcontainers repository tests passing).
 
-No Phase 1 service, controller, DTO, URL validation, or exception-handling
+Phase 1B slice implemented and tested successfully
+(registration DTOs, deterministic URL validation with unit tests).
+
+No Phase 1 service, controller, or exception-handling
 work has been started.
 
 ## Next Action
 
 The next implementation task is the remainder of Phase 1 — Policy Registration:
-Policy service, controller, DTOs, URL validation, and global RFC 7807
+Policy service, controller, and global RFC 7807
 exception handling with their tests, as scoped in ARCHITECTURE.md §31.
-The Flyway V1 policy schema, Policy entity, and Policy repository foundation
-is already in place.
+The persistence foundation, registration DTOs, and URL validation
+are already in place.
