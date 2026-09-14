@@ -52,10 +52,10 @@ Completed:
 - URL validation
 - Policy service
 - Policy controller
+- RFC 7807/global error handling
 
 Remaining:
-- RFC 7807/global exception handling
-- remaining Phase 1 integration tests
+- Final Phase 1 integration/acceptance tests
 
 ## Next Phase
 
@@ -72,8 +72,8 @@ Phase 1 scope (foundation slice done; remainder not started):
 - URL validation — DONE (registration-time syntactic rules; network-level SSRF checks belong to the fetch phase)
 - Policy service — DONE (registration + retrieval, mocked unit tests)
 - Policy controller — DONE (registration/retrieval endpoints, WebMvcTest slice tests)
-- Global exception handling / RFC 7807 — not started
-- remaining Phase 1 tests — not started
+- Global exception handling / RFC 7807 — DONE (ProblemDetail, 404/400 mappings, application/problem+json)
+- remaining Phase 1 tests — not started (final integration/acceptance tests)
 
 ## Current Status
 
@@ -90,13 +90,16 @@ Phase 1C slice implemented and tested successfully
 Phase 1D slice implemented and tested successfully
 (policy controller with WebMvcTest slice tests).
 
-No Phase 1 exception-handling
-work has been started.
+Phase 1E slice implemented and tested successfully
+(global RFC 7807 error handling with ProblemDetail and WebMvcTest coverage).
+
+No final Phase 1 integration/acceptance tests
+have been started.
 
 ## Next Action
 
-The next implementation task is the remainder of Phase 1 — Policy Registration:
-global RFC 7807 exception handling with its tests,
+The next implementation task is the final Phase 1 integration/acceptance tests,
 as scoped in ARCHITECTURE.md §31.
 The persistence foundation, registration DTOs, URL validation,
-policy service, and policy controller are already in place.
+policy service, policy controller, and global RFC 7807 error handling
+are already in place.
