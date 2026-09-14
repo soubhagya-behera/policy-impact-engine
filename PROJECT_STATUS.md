@@ -41,29 +41,53 @@ The database name `policypulse` is retained intentionally. No rename is planned 
 
 **Phase 0 — Foundation: COMPLETE**
 
+**Phase 1 — Policy Registration
+Status: IN PROGRESS**
+
+Completed:
+- Policy database migration
+- Policy entity
+- Policy repository
+
+Remaining:
+- URL validation
+- DTOs
+- Policy service
+- Policy controller
+- RFC 7807/global exception handling
+- remaining Phase 1 tests
+
 ## Next Phase
 
 **Phase 1 — Policy Registration**
 
-Phase 1 scope (not started):
+Phase 1 scope (foundation slice done; remainder not started):
 
-- Policy entity
-- Policy repository
-- Policy service
-- Policy controller
-- URL validation
-- DTOs
-- Global exception handling / RFC 7807
-- Flyway V1 policy schema
-- `spring.jpa.hibernate.ddl-auto=validate`
-- Testcontainers PostgreSQL repository tests
+- Policy entity — DONE
+- Policy repository — DONE
+- Flyway V1 policy schema — DONE
+- `spring.jpa.hibernate.ddl-auto=validate` — DONE
+- Testcontainers PostgreSQL repository tests — DONE (foundation slice)
+- Policy service — not started
+- Policy controller — not started
+- URL validation — not started
+- DTOs — not started
+- Global exception handling / RFC 7807 — not started
+- remaining Phase 1 tests — not started
 
 ## Current Status
 
-Ready to begin Phase 1.
+Phase 1 foundation slice implemented and tested successfully
+(Flyway V1 migration, Policy entity, Policy repository,
+Testcontainers repository tests passing).
 
-No Phase 1 work has been started. No entity, repository, service, controller, migration, or Phase 1 test exists in the repository at the time of this document.
+No Phase 1 service, controller, DTO, URL validation, or exception-handling
+work has been started.
 
 ## Next Action
 
-The next implementation task is Phase 1 — Policy Registration: introduce Flyway with the V1 policy schema, then implement the Policy registration vertical slice (entity, repository, service, controller, DTOs, URL validation, global RFC 7807 exception handling) with its tests, as scoped in ARCHITECTURE.md §31.
+The next implementation task is the remainder of Phase 1 — Policy Registration:
+Policy service, controller, DTOs, URL validation, and global RFC 7807
+exception handling with their tests, as scoped in ARCHITECTURE.md §31.
+The Flyway V1 policy schema, Policy entity, and Policy repository foundation
+is already in place.
