@@ -70,9 +70,14 @@ Completed (Phase 2B — SSRF Protection):
 - DnsResolver abstraction (InetAddress::getAllByName in production, mocked in tests for deterministic private-host tests)
 - HttpPolicyFetcher integrated with SsrfGuard (validateUrl before HttpClient, retains Redirect.NEVER)
 
+Completed (Phase 2C — Response Size Limits):
+- MAX_RESPONSE_BODY_BYTES (1 MiB, byte-counted before UTF-8 decoding, documented in HttpPolicyFetcher)
+- Two-layer enforcement: Content-Length pre-check (reject without consuming body) + bounded streaming read via BodyHandlers.ofInputStream() (chunked/length-omitted safe, never unbounded ofString() allocation)
+- Oversized responses fail with PolicyFetchException (no partial content, no silent truncation)
+- HttpPolicyFetcherSizeLimitTest (7 deterministic local-HttpServer tests: below/at/above limit, Content-Length rejection, chunked rejection, multibyte byte-counting, no-partial-content)
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
-- Response-size limits
 - Jsoup / HTML extraction
 - Text normalization
 - SHA-256 / SimHash
@@ -108,7 +113,12 @@ Phase 2B — SSRF Protection is DONE:
 - HttpPolicyFetcher SSRF integration — DONE (strict guard blocks localhost/private before connect; Redirect.NEVER retained)
 - HttpPolicyFetcherTest updated — DONE (HTTP-layer tests now use permissive guard to isolate transport; new strict tests verify localhost/private blocked)
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, size limits, Jsoup, extraction, normalization).
+Phase 2C — Response Size Limits is DONE:
+- Byte-counted 1 MiB limit with Content-Length pre-check + streaming enforcement — DONE
+- HttpPolicyFetcherSizeLimitTest (below/at/above limit, Content-Length, chunked, multibyte, no-partial-content) — DONE
+- Existing SSRF/HTTP status/timeout behavior preserved — DONE (115 tests passing)
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, Jsoup, extraction, normalization).
 
 ## Current Status
 
@@ -143,10 +153,15 @@ Phase 2B slice implemented and tested successfully
 (SsrfAddressValidator + SsrfGuard + DnsResolver, HttpPolicyFetcher SSRF integration with
 Redirect.NEVER, deterministic local tests without external DNS/internet — 108 tests passing).
 
+Phase 2C slice implemented and tested successfully
+(byte-counted 1 MiB response limit with Content-Length pre-check + bounded
+streaming read via BodyHandlers.ofInputStream(), HttpPolicyFetcherSizeLimitTest —
+deterministic local tests without external network — 115 tests passing).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 ## Next Action
 
-The next implementation task is the next Phase 2 slice (response-size limits / Jsoup /
+The next implementation task is the next Phase 2 slice (redirect revalidation / Jsoup /
 extraction / normalization), as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2C without explicit instruction.
+Do not begin Phase 2D without explicit instruction.

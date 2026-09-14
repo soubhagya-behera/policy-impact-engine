@@ -1,10 +1,13 @@
 package com.soubhagya.policyimpactengine.policy.fetch;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,9 +32,35 @@ import org.springframework.stereotype.Component;
  * ({@code HttpClient.Redirect.NEVER}). A 3xx response is treated as
  * a failure. Per-redirect SSRF revalidation will be added when redirects
  * are enabled in a later slice.
+ *
+ * <p><b>Response-size limit:</b> the response body is bounded by
+ * {@link #MAX_RESPONSE_BODY_BYTES} <b>bytes</b> of the raw response body,
+ * counted before decoding to {@link String}. Multibyte UTF-8 content is
+ * therefore counted by its encoded byte length, not by Java character
+ * count. The limit is enforced in two layers: (1) a {@code Content-Length}
+ * pre-check rejects oversized responses before the body is consumed, and
+ * (2) the body is streamed via {@code BodyHandlers.ofInputStream()} with a
+ * bounded read so chunked or length-omitted responses can never cause
+ * unbounded allocation. Oversized responses fail with
+ * {@link PolicyFetchException}; partial content is never returned.
  */
 @Component
 public class HttpPolicyFetcher implements PolicyFetcher {
+
+	/**
+	 * Maximum accepted response-body size in bytes (1 MiB).
+	 *
+	 * <p>Chosen for the policy-fetch use case: real-world policy HTML pages
+	 * are typically tens to low hundreds of kilobytes, so 1 MiB leaves ample
+	 * headroom while bounding per-fetch memory. Counted on raw body bytes
+	 * before UTF-8 decoding, so multibyte characters count by their encoded
+	 * size. Kept as a code-level constant for this slice; easy to change and
+	 * overridable via the test constructor below without an external
+	 * configuration system.
+	 */
+	public static final long MAX_RESPONSE_BODY_BYTES = 1_048_576L;
+
+	private static final int READ_BUFFER_SIZE = 8192;
 
 	private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(5);
 	private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(10);
@@ -39,6 +68,7 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 	private final HttpClient client;
 	private final Duration requestTimeout;
 	private final SsrfGuard ssrfGuard;
+	private final long maxResponseBodyBytes;
 
 	@Autowired
 	public HttpPolicyFetcher(SsrfGuard ssrfGuard) {
@@ -59,11 +89,24 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 	}
 
 	public HttpPolicyFetcher(SsrfGuard ssrfGuard, Duration connectTimeout, Duration requestTimeout) {
+		this(ssrfGuard, connectTimeout, requestTimeout, MAX_RESPONSE_BODY_BYTES);
+	}
+
+	/**
+	 * Creates a fetcher with an explicit maximum body size in bytes.
+	 * Used by tests to exercise boundary semantics with small limits
+	 * without downloading production-sized payloads.
+	 */
+	public HttpPolicyFetcher(SsrfGuard ssrfGuard, Duration connectTimeout, Duration requestTimeout,
+			long maxResponseBodyBytes) {
 		if (ssrfGuard == null) {
 			throw new IllegalArgumentException("SsrfGuard must not be null");
 		}
 		if (connectTimeout == null || requestTimeout == null) {
 			throw new IllegalArgumentException("Timeouts must not be null");
+		}
+		if (maxResponseBodyBytes < 1) {
+			throw new IllegalArgumentException("Maximum response body size must be positive");
 		}
 		this.ssrfGuard = ssrfGuard;
 		this.client = HttpClient.newBuilder()
@@ -71,6 +114,7 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 				.followRedirects(HttpClient.Redirect.NEVER)
 				.build();
 		this.requestTimeout = requestTimeout;
+		this.maxResponseBodyBytes = maxResponseBodyBytes;
 	}
 
 	@Override
@@ -96,9 +140,11 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 				.header("User-Agent", "PolicyImpactEngine/1.0")
 				.build();
 
-		HttpResponse<String> response;
+		HttpResponse<InputStream> response;
 		try {
-			response = client.send(request, HttpResponse.BodyHandlers.ofString());
+			// ofInputStream() returns once headers arrive; the body streams,
+			// so no unbounded String is ever allocated before the size check.
+			response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
 		}
 		catch (IOException ex) {
 			throw new PolicyFetchException("Failed to fetch URL: " + url + " — " + ex.getMessage(), ex);
@@ -113,6 +159,7 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 
 		int status = response.statusCode();
 		if (status < 200 || status >= 300) {
+			closeQuietly(response.body());
 			throw new PolicyFetchException(
 					"Fetch failed for URL: " + url + " with HTTP status " + status);
 		}
@@ -121,11 +168,63 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 				.firstValue("Content-Type")
 				.orElse(null);
 
-		String body = response.body();
-		if (body == null) {
-			body = "";
+		// Layer 1: Content-Length pre-check — reject without consuming the body.
+		// Never the only protection: servers may omit it or use chunked encoding.
+		long contentLength = response.headers()
+				.firstValueAsLong("Content-Length")
+				.orElse(-1L);
+		if (contentLength > maxResponseBodyBytes) {
+			closeQuietly(response.body());
+			throw new PolicyFetchException(
+					"Response exceeded maximum allowed size: Content-Length " + contentLength
+							+ " bytes exceeds maximum of " + maxResponseBodyBytes + " bytes for URL: " + url);
 		}
 
+		// Layer 2: bounded streaming read — enforces the limit for chunked or
+		// length-omitted bodies. Counts raw bytes before UTF-8 decoding.
+		String body = readBoundedBody(response.body(), url);
+
 		return new FetchResult(trimmed, status, contentType, body);
+	}
+
+	/**
+	 * Reads the response stream up to {@code maxResponseBodyBytes + 1} bytes.
+	 * Fails with {@link PolicyFetchException} as soon as the limit is
+	 * exceeded, without allocating the full oversized payload.
+	 */
+	private String readBoundedBody(InputStream bodyStream, String url) {
+		try (InputStream in = bodyStream) {
+			ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+			byte[] chunk = new byte[READ_BUFFER_SIZE];
+			long total = 0;
+			int read;
+			while ((read = in.read(chunk)) != -1) {
+				total += read;
+				if (total > maxResponseBodyBytes) {
+					throw new PolicyFetchException(
+							"Response exceeded maximum allowed size: response body exceeds maximum of "
+									+ maxResponseBodyBytes + " bytes for URL: " + url);
+				}
+				buffer.write(chunk, 0, read);
+			}
+			return buffer.toString(StandardCharsets.UTF_8);
+		}
+		catch (PolicyFetchException ex) {
+			throw ex;
+		}
+		catch (IOException ex) {
+			throw new PolicyFetchException("Failed to fetch URL: " + url + " — " + ex.getMessage(), ex);
+		}
+	}
+
+	private static void closeQuietly(InputStream stream) {
+		if (stream != null) {
+			try {
+				stream.close();
+			}
+			catch (IOException ignored) {
+				// Best effort: the fetch already failed.
+			}
+		}
 	}
 }
