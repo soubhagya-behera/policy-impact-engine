@@ -55,9 +55,27 @@ Completed:
 - RFC 7807/global error handling
 - Final integration/acceptance tests
 
+**Phase 2 — Policy Fetching
+Status: IN PROGRESS**
+
+Completed (Phase 2A — Fetcher Foundation):
+- PolicyFetcher abstraction (application-level interface)
+- FetchResult model (url, statusCode, contentType, body)
+- PolicyFetchException (small hierarchy, non-2xx and IO/timeout handling)
+- HttpPolicyFetcher (Java HttpClient, explicit connect/request timeouts, Redirect.NEVER, independent of controller/JPA)
+
+Not yet implemented:
+- SSRF protection (DNS/IP validation, private/loopback/link-local blocking, redirect revalidation)
+- Response-size limits
+- Jsoup / HTML extraction
+- Text normalization
+- SHA-256 / SimHash
+- PolicyVersion / versioning
+- Diff / classification / concepts / impact / recommendations / scheduler / notifications
+
 ## Next Phase
 
-**Phase 2 — Policy Fetching**
+**Phase 2 — Policy Fetching (continued)**
 
 Phase 1 is complete. All Phase 1 vertical slices are implemented and tested:
 
@@ -73,9 +91,12 @@ Phase 1 is complete. All Phase 1 vertical slices are implemented and tested:
 - Global exception handling / RFC 7807 — DONE (ProblemDetail, 404/400 mappings, application/problem+json)
 - Final integration/acceptance tests — DONE (Testcontainers PostgreSQL end-to-end vertical slice: POST → GET by ID → GET collection, invalid URL and bean validation — application/problem+json, Hibernate validate + Flyway)
 
-Phase 2 will introduce policy fetching (fetcher interface, HTTP/Jsoup implementation,
-SSRF protection, timeouts, response-size limits, readable-content extraction, normalization).
-No Phase 2 functionality has been implemented.
+Phase 2A — Fetcher Foundation is DONE:
+- PolicyFetcher interface — DONE
+- Basic HTTP fetch implementation (java.net.http.HttpClient, 5s connect / 10s request, Redirect.NEVER, documented non-SSRF-safe) — DONE
+- Fetcher tests with local HttpServer (no external network, no Testcontainers) — DONE (success, body, 404, 500, redirect, timeout, unreachable host, blank URL)
+
+Remaining Phase 2 scope will be built in later slices (SSRF, size limits, Jsoup, extraction, normalization).
 
 ## Current Status
 
@@ -102,8 +123,14 @@ Flyway + Hibernate validate, 49 tests passing).
 
 Phase 1 — Policy Registration is COMPLETE.
 
+Phase 2A slice implemented and tested successfully
+(PolicyFetcher abstraction, HttpPolicyFetcher with explicit timeouts and Redirect.NEVER,
+FetchResult + PolicyFetchException, local HttpServer tests — 57 tests passing).
+
+Phase 2 — Policy Fetching is IN PROGRESS.
+
 ## Next Action
 
-Phase 2 — Policy Fetching is the next implementation task,
-as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2 without explicit instruction.
+The next implementation task is the SSRF/redirect-security slice of Phase 2,
+as scoped in ARCHITECTURE.md §27 and §31.
+Do not begin Phase 2B without explicit instruction.
