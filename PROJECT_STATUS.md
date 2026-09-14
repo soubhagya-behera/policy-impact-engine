@@ -64,8 +64,14 @@ Completed (Phase 2A — Fetcher Foundation):
 - PolicyFetchException (small hierarchy, non-2xx and IO/timeout handling)
 - HttpPolicyFetcher (Java HttpClient, explicit connect/request timeouts, Redirect.NEVER, independent of controller/JPA)
 
+Completed (Phase 2B — SSRF Protection):
+- SsrfAddressValidator (pure IP-range checks: loopback, private 10/8 172.16/12 192.168/16, link-local, unspecified, multicast, CGNAT, TEST-NET, IPv6 loopback/link-local/ULA fc00::/7, documentation 2001:db8::/32)
+- SsrfGuard (DNS resolution via DnsResolver, validates every resolved address, blocks if ANY private/non-public, @Component, TOCTOU limitation documented)
+- DnsResolver abstraction (InetAddress::getAllByName in production, mocked in tests for deterministic private-host tests)
+- HttpPolicyFetcher integrated with SsrfGuard (validateUrl before HttpClient, retains Redirect.NEVER)
+
 Not yet implemented:
-- SSRF protection (DNS/IP validation, private/loopback/link-local blocking, redirect revalidation)
+- Redirect revalidation (redirects remain disabled)
 - Response-size limits
 - Jsoup / HTML extraction
 - Text normalization
@@ -96,7 +102,13 @@ Phase 2A — Fetcher Foundation is DONE:
 - Basic HTTP fetch implementation (java.net.http.HttpClient, 5s connect / 10s request, Redirect.NEVER, documented non-SSRF-safe) — DONE
 - Fetcher tests with local HttpServer (no external network, no Testcontainers) — DONE (success, body, 404, 500, redirect, timeout, unreachable host, blank URL)
 
-Remaining Phase 2 scope will be built in later slices (SSRF, size limits, Jsoup, extraction, normalization).
+Phase 2B — SSRF Protection is DONE:
+- SsrfAddressValidator — DONE (37 address-range tests: 127.0.0.1, 10/8, 172.16/12, 192.168/16, link-local, unspecified, multicast, CGNAT, TEST-NET, IPv6 ::1/fe80/fc00/fd00/ff02/2001:db8, public allowed)
+- SsrfGuard — DONE (12 tests: private literals, public literal, IPv6 literals, mock DNS private/public/mixed, TOCTOU documented)
+- HttpPolicyFetcher SSRF integration — DONE (strict guard blocks localhost/private before connect; Redirect.NEVER retained)
+- HttpPolicyFetcherTest updated — DONE (HTTP-layer tests now use permissive guard to isolate transport; new strict tests verify localhost/private blocked)
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, size limits, Jsoup, extraction, normalization).
 
 ## Current Status
 
@@ -127,10 +139,14 @@ Phase 2A slice implemented and tested successfully
 (PolicyFetcher abstraction, HttpPolicyFetcher with explicit timeouts and Redirect.NEVER,
 FetchResult + PolicyFetchException, local HttpServer tests — 57 tests passing).
 
+Phase 2B slice implemented and tested successfully
+(SsrfAddressValidator + SsrfGuard + DnsResolver, HttpPolicyFetcher SSRF integration with
+Redirect.NEVER, deterministic local tests without external DNS/internet — 108 tests passing).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 ## Next Action
 
-The next implementation task is the SSRF/redirect-security slice of Phase 2,
-as scoped in ARCHITECTURE.md §27 and §31.
-Do not begin Phase 2B without explicit instruction.
+The next implementation task is the next Phase 2 slice (response-size limits / Jsoup /
+extraction / normalization), as scoped in ARCHITECTURE.md §31.
+Do not begin Phase 2C without explicit instruction.

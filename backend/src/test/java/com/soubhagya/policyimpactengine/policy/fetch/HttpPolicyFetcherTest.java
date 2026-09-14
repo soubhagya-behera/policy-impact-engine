@@ -20,6 +20,13 @@ import com.sun.net.httpserver.HttpServer;
 /**
  * Focused tests for {@link HttpPolicyFetcher} using a deterministic local
  * {@link HttpServer}. No external network access, no Testcontainers.
+ *
+ * <p>After Phase 2B, outbound fetching is SSRF-protected: localhost and
+ * private addresses are rejected. HTTP-transport tests therefore use a
+ * permissive {@link SsrfGuard} to isolate the HTTP layer, while dedicated
+ * {@link SsrfGuardTest} and {@link SsrfAddressValidatorTest} verify the
+ * security layer. The update ensures localhost fetch tests do not
+ * accidentally bypass security in production.
  */
 class HttpPolicyFetcherTest {
 
@@ -69,7 +76,7 @@ class HttpPolicyFetcherTest {
 
 	@Test
 	void successfulFetchReturnsBodyAndMetadata() {
-		HttpPolicyFetcher fetcher = new HttpPolicyFetcher();
+		HttpPolicyFetcher fetcher = permissiveFetcher();
 
 		FetchResult result = fetcher.fetch(baseUrl + "/ok");
 
@@ -81,7 +88,7 @@ class HttpPolicyFetcherTest {
 
 	@Test
 	void http404IsTreatedAsFailure() {
-		HttpPolicyFetcher fetcher = new HttpPolicyFetcher();
+		HttpPolicyFetcher fetcher = permissiveFetcher();
 
 		assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/notfound"))
 				.isInstanceOf(PolicyFetchException.class)
@@ -90,7 +97,7 @@ class HttpPolicyFetcherTest {
 
 	@Test
 	void http500IsTreatedAsFailure() {
-		HttpPolicyFetcher fetcher = new HttpPolicyFetcher();
+		HttpPolicyFetcher fetcher = permissiveFetcher();
 
 		assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/error"))
 				.isInstanceOf(PolicyFetchException.class)
@@ -99,7 +106,7 @@ class HttpPolicyFetcherTest {
 
 	@Test
 	void redirectIsNotFollowedAndIsTreatedAsFailure() {
-		HttpPolicyFetcher fetcher = new HttpPolicyFetcher();
+		HttpPolicyFetcher fetcher = permissiveFetcher();
 
 		assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/redirect"))
 				.isInstanceOf(PolicyFetchException.class)
@@ -108,7 +115,7 @@ class HttpPolicyFetcherTest {
 
 	@Test
 	void timeoutIsHandledPredictably() {
-		HttpPolicyFetcher fetcher = new HttpPolicyFetcher(
+		HttpPolicyFetcher fetcher = permissiveFetcher(
 				Duration.ofSeconds(1), Duration.ofMillis(300));
 
 		assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/slow"))
@@ -116,11 +123,30 @@ class HttpPolicyFetcherTest {
 	}
 
 	@Test
-	void unreachableHostIsHandledAsFailure() {
-		HttpPolicyFetcher fetcher = new HttpPolicyFetcher(
+	void strictFetcherBlocksLocalhostBeforeConnecting() {
+		HttpPolicyFetcher strictFetcher = new HttpPolicyFetcher();
+
+		assertThatThrownBy(() -> strictFetcher.fetch(baseUrl + "/ok"))
+				.isInstanceOf(PolicyFetchException.class)
+				.hasMessageContaining("SSRF");
+	}
+
+	@Test
+	void strictFetcherBlocksPrivateIpLiteral() {
+		HttpPolicyFetcher strictFetcher = new HttpPolicyFetcher(
 				Duration.ofMillis(500), Duration.ofMillis(500));
 
-		// closed port — deterministic, no external DNS
+		assertThatThrownBy(() -> strictFetcher.fetch("http://127.0.0.1:1/"))
+				.isInstanceOf(PolicyFetchException.class)
+				.hasMessageContaining("SSRF");
+	}
+
+	@Test
+	void unreachableHostIsHandledAsFailureWithPermissiveGuard() {
+		HttpPolicyFetcher fetcher = permissiveFetcher(
+				Duration.ofMillis(500), Duration.ofMillis(500));
+
+		// closed port — deterministic, no external DNS, SSRF bypassed to test transport
 		assertThatThrownBy(() -> fetcher.fetch("http://127.0.0.1:1/"))
 				.isInstanceOf(PolicyFetchException.class);
 	}
@@ -136,7 +162,7 @@ class HttpPolicyFetcherTest {
 
 	@Test
 	void doesNotReturnEmptySuccessForFailedRequests() {
-		HttpPolicyFetcher fetcher = new HttpPolicyFetcher();
+		HttpPolicyFetcher fetcher = permissiveFetcher();
 
 		// Ensure 404 does not produce an empty FetchResult
 		try {
@@ -147,6 +173,31 @@ class HttpPolicyFetcherTest {
 			return;
 		}
 		throw new AssertionError("Expected PolicyFetchException not thrown");
+	}
+
+	private HttpPolicyFetcher permissiveFetcher() {
+		return new HttpPolicyFetcher(permissiveGuard(), Duration.ofSeconds(5), Duration.ofSeconds(10));
+	}
+
+	private HttpPolicyFetcher permissiveFetcher(Duration connectTimeout, Duration requestTimeout) {
+		return new HttpPolicyFetcher(permissiveGuard(), connectTimeout, requestTimeout);
+	}
+
+	private static SsrfGuard permissiveGuard() {
+		return new SsrfGuard(host -> new java.net.InetAddress[0]) {
+			@Override
+			public void validateUrl(String url) {
+				// bypass SSRF for HTTP-layer isolation tests
+			}
+
+			@Override
+			public void validateHost(String host) {
+			}
+
+			@Override
+			public void validateAddress(java.net.InetAddress address) {
+			}
+		};
 	}
 
 	private String baseUrlPlaceholder() {

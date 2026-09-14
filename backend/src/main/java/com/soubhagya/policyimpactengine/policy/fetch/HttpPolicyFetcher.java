@@ -7,24 +7,28 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * Basic HTTP fetcher using Java's standard {@link HttpClient}.
+ * Basic HTTP fetcher using Java's standard {@link HttpClient} with
+ * network-level SSRF protection.
  *
  * <p>Responsibility is limited to obtaining the HTTP response body and
  * status information for a given URL. It does not perform HTML parsing,
  * extraction, normalization, hashing, or versioning.
  *
- * <p><b>SSRF limitation:</b> this foundational implementation does not
- * perform DNS-based private IP blocking, redirect revalidation, or
- * response-size limits. Production external fetching will require the
- * dedicated SSRF-hardening slice before it is considered safe.
+ * <p><b>SSRF protection:</b> every request is validated via {@link SsrfGuard}
+ * before connecting. The guard resolves the hostname and rejects any URL
+ * whose DNS records contain loopback, private, link-local, unspecified,
+ * multicast, or other non-public addresses (IPv4 and IPv6). See
+ * {@link SsrfGuard} for the TOCTOU / DNS-rebinding limitation that remains
+ * with Java's standard HttpClient.
  *
  * <p><b>Redirects:</b> redirects are not followed
  * ({@code HttpClient.Redirect.NEVER}). A 3xx response is treated as
- * a failure so that redirect targets cannot bypass future SSRF checks
- * silently. Enabling and securing redirects is deferred to the SSRF slice.
+ * a failure. Per-redirect SSRF revalidation will be added when redirects
+ * are enabled in a later slice.
  */
 @Component
 public class HttpPolicyFetcher implements PolicyFetcher {
@@ -34,19 +38,34 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 
 	private final HttpClient client;
 	private final Duration requestTimeout;
+	private final SsrfGuard ssrfGuard;
+
+	@Autowired
+	public HttpPolicyFetcher(SsrfGuard ssrfGuard) {
+		this(ssrfGuard, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT);
+	}
 
 	public HttpPolicyFetcher() {
-		this(DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT);
+		this(new SsrfGuard(), DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT);
 	}
 
 	/**
 	 * Creates a fetcher with explicit timeouts. Used by tests to exercise
 	 * timeout behavior without waiting for conservative production defaults.
+	 * Uses a strict {@link SsrfGuard} with real DNS resolution.
 	 */
 	public HttpPolicyFetcher(Duration connectTimeout, Duration requestTimeout) {
+		this(new SsrfGuard(), connectTimeout, requestTimeout);
+	}
+
+	public HttpPolicyFetcher(SsrfGuard ssrfGuard, Duration connectTimeout, Duration requestTimeout) {
+		if (ssrfGuard == null) {
+			throw new IllegalArgumentException("SsrfGuard must not be null");
+		}
 		if (connectTimeout == null || requestTimeout == null) {
 			throw new IllegalArgumentException("Timeouts must not be null");
 		}
+		this.ssrfGuard = ssrfGuard;
 		this.client = HttpClient.newBuilder()
 				.connectTimeout(connectTimeout)
 				.followRedirects(HttpClient.Redirect.NEVER)
@@ -59,9 +78,12 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 		if (url == null || url.isBlank()) {
 			throw new PolicyFetchException("URL must not be blank");
 		}
+		String trimmed = url.trim();
+		ssrfGuard.validateUrl(trimmed);
+
 		URI uri;
 		try {
-			uri = URI.create(url.trim());
+			uri = URI.create(trimmed);
 		}
 		catch (IllegalArgumentException ex) {
 			throw new PolicyFetchException("Invalid URL: " + url, ex);
@@ -104,6 +126,6 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 			body = "";
 		}
 
-		return new FetchResult(url.trim(), status, contentType, body);
+		return new FetchResult(trimmed, status, contentType, body);
 	}
 }
