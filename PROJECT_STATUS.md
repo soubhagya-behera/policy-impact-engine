@@ -112,11 +112,16 @@ Completed (Phase 2H — Policy Observation Orchestration):
 - PolicyObservationServiceTest (10 deterministic Mockito unit tests, no network/DB: first/unchanged/changed, not-found without fetch, fetch/extraction/normalization/hashing failure propagation, exact content+hash capture, invocation order)
 - PolicyObservationServiceIntegrationTest (Testcontainers PostgreSQL end-to-end: real repos + real version service + real extractor/normalizer/hasher + stub fetcher; v1 created → reformatted same content UNCHANGED → changed wording v2; v1 immutability, hashes, and 1/2 numbering verified) — 179 tests passing, BUILD SUCCESS
 
+Completed (Phase 2I — Deterministic Policy Diff Engine):
+- Top-level diff module (com.soubhagya.policyimpactengine.diff, per ARCHITECTURE.md §7): PolicyChangeType (ADDED/REMOVED/MODIFIED), PolicyChange immutable record (null-shape + non-equal MODIFIED validation), PolicyDiffResult immutable ordered record, PolicyDiffEngine abstraction
+- LineBasedPolicyDiffEngine (JDK-only classical LCS over normalized-text lines with deterministic delete-on-tie forward backtrack; conservative rule: only a 1-removed + 1-added hunk becomes MODIFIED, all other hunks stay primitive ADDED/REMOVED; null means empty document; no normalization performed; stateless/thread-safe/pure, no Spring/DB/HTTP/user/clock/randomness)
+- Not wired into PolicyObservationService (observation pipeline unchanged; version-to-version integration belongs to the next slice)
+- LineBasedPolicyDiffEngineTest (21 deterministic inline-string unit tests, no network/DB/Spring) + PolicyDiffGoldenTest (3 tests pinning the V1→V2 privacy-policy update to exactly 3 MODIFIED changes with exact old/new text) — 203 tests passing, BUILD SUCCESS
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
 - SimHash / near-duplicate handling (if still planned)
-- Policy observation orchestration/integration (scheduler/manual check wiring fetch → extract → normalize → hash → observe)
-- Diff / textual version comparison
+- Diff-to-version integration (wiring the diff engine into version observation)
 - Classification / concepts / impact / recommendations / scheduler / notifications
 
 ## Next Phase
@@ -182,7 +187,13 @@ Phase 2H — Policy Observation Orchestration is DONE:
 - Deterministic unit tests (no network/DB) — DONE
 - End-to-end Testcontainers integration test (stub fetcher, real pipeline) — DONE
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, SimHash if still planned, and later pipeline stages).
+Phase 2I — Deterministic Policy Diff Engine is DONE:
+- diff module (PolicyChangeType/PolicyChange/PolicyDiffResult/PolicyDiffEngine) — DONE
+- LineBasedPolicyDiffEngine (JDK-only LCS, conservative MODIFIED rule) — DONE
+- Deterministic unit tests + golden privacy-policy test — DONE
+- Observation pipeline untouched (no diff wiring; integration is the next slice) — DONE
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, diff-to-version integration, SimHash if still planned, and later pipeline stages).
 
 ## Current Status
 
@@ -251,6 +262,13 @@ hash → observe with PolicyObservationResult, pipeline bean wiring,
 Mockito unit tests plus Testcontainers end-to-end test with stub
 fetcher proving v1 → UNCHANGED → v2 with v1 immutability).
 
+Phase 2I slice implemented and tested successfully
+(top-level diff module with PolicyChangeType/PolicyChange/
+PolicyDiffResult/PolicyDiffEngine plus JDK-only LineBasedPolicyDiffEngine
+with conservative MODIFIED rule, 21 deterministic unit tests and a
+golden privacy-policy test pinning V1→V2 to exactly 3 MODIFIED changes;
+observation pipeline untouched).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 Phase 2A — COMPLETE
@@ -261,12 +279,14 @@ Phase 2E — COMPLETE
 Phase 2F — COMPLETE
 Phase 2G — COMPLETE
 Phase 2H — COMPLETE
+Phase 2I — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
-- textual diffing
+- diff-to-version integration
 - SimHash/near-duplicate handling if still planned
-- concept matching
+- privacy concept matching
 - impact analysis
+- personalized assessment
 - recommendations
 - PolicyFetchAttempt/observation attempt tracking
 - scheduling
@@ -276,7 +296,7 @@ Do not mark Phase 2 complete yet.
 
 ## Next Action
 
-The next implementation task is the next Phase 2 slice (textual diffing
-and later pipeline stages),
+The next implementation task is the next Phase 2 slice (diff-to-version
+integration and later pipeline stages),
 as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2I without explicit instruction.
+Do not begin Phase 2J without explicit instruction.
