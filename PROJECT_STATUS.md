@@ -104,6 +104,14 @@ Completed (Phase 2G — Version Persistence & Exact Change Detection):
 - PolicyVersionObservation result record + PolicyVersionObservationOutcome enum
 - PolicyVersionRepositoryTest (7 Testcontainers tests) + PolicyVersionServiceTest (14 Testcontainers tests) — 168 tests passing, BUILD SUCCESS
 
+Completed (Phase 2H — Policy Observation Orchestration):
+- PolicyObservationService.observe(policyId) (application-level orchestration: load → fetch → extract → normalize → hash → PolicyVersionService.observe; owns no pipeline stage itself)
+- PolicyObservationResult record (policyId, outcome, versionNumber, contentHash; no JPA entities exposed)
+- PolicyFetchConfiguration (Spring wiring for the stateless extractor/normalizer/hasher; existing components untouched)
+- Deliberately NOT @Transactional: policy lookup uses the repository's short read, the HTTP fetch runs with no DB transaction held, PolicyVersionService owns its persistence transaction
+- PolicyObservationServiceTest (10 deterministic Mockito unit tests, no network/DB: first/unchanged/changed, not-found without fetch, fetch/extraction/normalization/hashing failure propagation, exact content+hash capture, invocation order)
+- PolicyObservationServiceIntegrationTest (Testcontainers PostgreSQL end-to-end: real repos + real version service + real extractor/normalizer/hasher + stub fetcher; v1 created → reformatted same content UNCHANGED → changed wording v2; v1 immutability, hashes, and 1/2 numbering verified) — 179 tests passing, BUILD SUCCESS
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
 - SimHash / near-duplicate handling (if still planned)
@@ -169,7 +177,12 @@ Phase 2G — Version Persistence & Exact Change Detection is DONE:
 - Unique (policy_id, version_number) concurrency guard — DONE
 - Testcontainers repository + service tests — DONE (168 tests passing)
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, observation orchestration/integration, SimHash if still planned, and later pipeline stages).
+Phase 2H — Policy Observation Orchestration is DONE:
+- PolicyObservationService + PolicyObservationResult + pipeline bean wiring — DONE
+- Deterministic unit tests (no network/DB) — DONE
+- End-to-end Testcontainers integration test (stub fetcher, real pipeline) — DONE
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, SimHash if still planned, and later pipeline stages).
 
 ## Current Status
 
@@ -232,6 +245,12 @@ observe with FIRST_VERSION/UNCHANGED/NEW_VERSION exact hash detection,
 unique (policy_id, version_number) concurrency guard,
 Testcontainers repository + service tests — 168 tests passing).
 
+Phase 2H slice implemented and tested successfully
+(PolicyObservationService orchestration fetch → extract → normalize →
+hash → observe with PolicyObservationResult, pipeline bean wiring,
+Mockito unit tests plus Testcontainers end-to-end test with stub
+fetcher proving v1 → UNCHANGED → v2 with v1 immutability).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 Phase 2A — COMPLETE
@@ -241,21 +260,23 @@ Phase 2D — COMPLETE
 Phase 2E — COMPLETE
 Phase 2F — COMPLETE
 Phase 2G — COMPLETE
+Phase 2H — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
-- policy observation orchestration/integration (fetch → extract → normalize → hash → observe wiring)
 - textual diffing
 - SimHash/near-duplicate handling if still planned
 - concept matching
 - impact analysis
 - recommendations
-- notification/scheduling
+- PolicyFetchAttempt/observation attempt tracking
+- scheduling
+- notifications
 
 Do not mark Phase 2 complete yet.
 
 ## Next Action
 
-The next implementation task is the next Phase 2 slice (observation
-orchestration/integration, textual diffing, and later pipeline stages),
+The next implementation task is the next Phase 2 slice (textual diffing
+and later pipeline stages),
 as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2H without explicit instruction.
+Do not begin Phase 2I without explicit instruction.
