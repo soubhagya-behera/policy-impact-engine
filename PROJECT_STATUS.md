@@ -137,10 +137,15 @@ Completed (Phase 2K — Persist Policy Changes):
 - Empty diff for NEW_VERSION persists zero rows explicitly (no invented change) and still carries the present empty diff; FIRST_VERSION/UNCHANGED never invoke diff and persist nothing
 - PolicyChangeRecordRepositoryTest (Testcontainers repository tests) + PolicyChangePersistenceIntegrationTest (Testcontainers end-to-end v1→v2→v3 with stub fetcher, atomic-rollback and empty-diff cases) plus updated orchestrator/persistence unit tests
 
+Completed (Phase 2L — SimHash / Near-Duplicate Detection):
+- diff-module SimHash utility only (PolicySimHash abstraction + DefaultPolicySimHash JDK-only 64-bit Charikar SimHash + SimHashDistance hamming/similarity helpers); plain Java, no Spring/DB/network, not wired into any pipeline
+- SHA-256 remains the sole exact-identity mechanism for unchanged detection; SimHash is an additional similarity signal only, never persisted, no migration, no threshold
+- Tokenization documented on the implementation: Unicode letter/digit runs ([^\p{L}\p{N}]+ separators), weight 1 per occurrence, case preserved, no stemming/stop-words/semantics; FNV-1a 64-bit token hashes; accumulator ties resolve to 0; null/empty/separator-only input yields 0L
+- DefaultPolicySimHashTest (empty/same/repeated/multi-instance/small + privacy fixtures, symmetry, Unicode, punctuation/case behavior, post-normalization equivalence, no-distance-assumption for different content, no-self-normalization, SHA-256-vs-SimHash distinction test) + SimHashDistanceTest (0/1/multi-bit distances, symmetry, similarity formula) — deterministic inline-string unit tests only
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
-- Persistent diff/change records (diff stays application-level)
-- SimHash / near-duplicate handling (if still planned)
+- SimHash integration/calibration (utility exists standalone; no pipeline use, no threshold)
 - Classification / concepts / impact / recommendations / scheduler / notifications
 
 ## Next Phase
@@ -226,7 +231,12 @@ Phase 2K — Persist Policy Changes is DONE:
 - Empty diff persists zero rows explicitly; failures propagate with rollback, no false success — DONE
 - Testcontainers repository + end-to-end persistence tests — DONE
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, persistent diff records, SimHash if still planned, and later pipeline stages).
+Phase 2L — SimHash / Near-Duplicate Detection is DONE:
+- Deterministic JDK-only 64-bit SimHash + Hamming-distance/similarity utilities in the diff module — DONE
+- SHA-256 untouched as exact identity; SimHash unpersisted, unwired, no thresholds — DONE
+- Deterministic inline-string unit tests incl. SHA-256-vs-SimHash distinction test — DONE
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, SimHash integration/calibration if applicable, and later pipeline stages).
 
 ## Current Status
 
@@ -320,6 +330,13 @@ persisting zero rows explicitly, failures propagating with rollback and
 no false success, Testcontainers repository + end-to-end persistence
 tests).
 
+Phase 2L slice implemented and tested successfully
+(deterministic JDK-only 64-bit SimHash utility plus Hamming-distance
+and similarity helpers in the diff module as plain Java with no Spring,
+database, or pipeline wiring; SHA-256 unchanged as the exact-identity
+mechanism; deterministic inline-string unit tests including the
+SHA-256-vs-SimHash distinction demonstration with no threshold).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 Phase 2A — COMPLETE
@@ -333,9 +350,10 @@ Phase 2H — COMPLETE
 Phase 2I — COMPLETE
 Phase 2J — COMPLETE
 Phase 2K — COMPLETE
+Phase 2L — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
-- SimHash/near-duplicate handling
+- SimHash integration/calibration if applicable
 - privacy concept matching
 - impact analysis
 - personalized assessment
@@ -348,7 +366,7 @@ Do not mark Phase 2 complete yet.
 
 ## Next Action
 
-The next implementation task is the next Phase 2 slice (persistent diff
-records and later pipeline stages),
+The next implementation task is the next Phase 2 slice (later pipeline
+stages),
 as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2K without explicit instruction.
+Do not begin Phase 2M without explicit instruction.
