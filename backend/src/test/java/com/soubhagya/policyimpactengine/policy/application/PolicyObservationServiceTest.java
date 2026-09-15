@@ -22,9 +22,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
+import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
+import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
 import com.soubhagya.policyimpactengine.policy.fetch.FetchResult;
 import com.soubhagya.policyimpactengine.policy.fetch.PolicyContentExtractor;
 import com.soubhagya.policyimpactengine.policy.fetch.PolicyContentHasher;
@@ -59,6 +62,12 @@ class PolicyObservationServiceTest {
 
 	@Mock
 	private PolicyVersionService versionService;
+
+	@Mock
+	private PolicyVersionRepository versionRepository;
+
+	@Mock
+	private PolicyDiffEngine diffEngine;
 
 	@InjectMocks
 	private PolicyObservationService service;
@@ -102,12 +111,17 @@ class PolicyObservationServiceTest {
 		when(versionService.observe(eq(policy.getId()), eq("changed text"), eq("hash-changed")))
 				.thenReturn(new PolicyVersionObservation(PolicyVersionObservationOutcome.NEW_VERSION,
 						new PolicyVersion(policy, 2, "changed text", "hash-changed")));
+		when(versionRepository.findByPolicy_IdAndVersionNumber(policy.getId(), 1))
+				.thenReturn(Optional.of(new PolicyVersion(policy, 1, "previous text", "hash-previous")));
+		PolicyDiffResult diff = new PolicyDiffResult(java.util.List.of());
+		when(diffEngine.diff("previous text", "changed text")).thenReturn(diff);
 
 		PolicyObservationResult result = service.observe(policy.getId());
 
 		assertThat(result.outcome()).isEqualTo(PolicyVersionObservationOutcome.NEW_VERSION);
 		assertThat(result.versionNumber()).isEqualTo(2);
 		assertThat(result.contentHash()).isEqualTo("hash-changed");
+		assertThat(result.diff()).contains(diff);
 	}
 
 	@Test
@@ -118,7 +132,8 @@ class PolicyObservationServiceTest {
 		assertThatThrownBy(() -> service.observe(id))
 				.isInstanceOf(NoSuchElementException.class);
 
-		verifyNoInteractions(fetcher, extractor, normalizer, hasher, versionService);
+		verifyNoInteractions(fetcher, extractor, normalizer, hasher, versionService, versionRepository,
+				diffEngine);
 	}
 
 	@Test
@@ -132,7 +147,7 @@ class PolicyObservationServiceTest {
 				.isInstanceOf(PolicyFetchException.class)
 				.hasMessageContaining("connection refused");
 
-		verifyNoInteractions(extractor, normalizer, hasher, versionService);
+		verifyNoInteractions(extractor, normalizer, hasher, versionService, versionRepository, diffEngine);
 	}
 
 	@Test
@@ -148,7 +163,7 @@ class PolicyObservationServiceTest {
 				.isInstanceOf(IllegalStateException.class)
 				.hasMessageContaining("extraction failed");
 
-		verifyNoInteractions(versionService);
+		verifyNoInteractions(versionService, versionRepository, diffEngine);
 		verify(normalizer, never()).normalize(any());
 		verify(hasher, never()).hash(any());
 	}
@@ -168,7 +183,7 @@ class PolicyObservationServiceTest {
 				.hasMessageContaining("normalization failed");
 
 		verify(hasher, never()).hash(any());
-		verifyNoInteractions(versionService);
+		verifyNoInteractions(versionService, versionRepository, diffEngine);
 	}
 
 	@Test
@@ -186,7 +201,7 @@ class PolicyObservationServiceTest {
 				.isInstanceOf(IllegalStateException.class)
 				.hasMessageContaining("hashing failed");
 
-		verifyNoInteractions(versionService);
+		verifyNoInteractions(versionService, versionRepository, diffEngine);
 	}
 
 	@Test

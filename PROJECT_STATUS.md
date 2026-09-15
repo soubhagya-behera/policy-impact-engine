@@ -118,10 +118,19 @@ Completed (Phase 2I — Deterministic Policy Diff Engine):
 - Not wired into PolicyObservationService (observation pipeline unchanged; version-to-version integration belongs to the next slice)
 - LineBasedPolicyDiffEngineTest (21 deterministic inline-string unit tests, no network/DB/Spring) + PolicyDiffGoldenTest (3 tests pinning the V1→V2 privacy-policy update to exactly 3 MODIFIED changes with exact old/new text) — 203 tests passing, BUILD SUCCESS
 
+Completed (Phase 2J — Diff-to-Version Integration):
+- PolicyObservationResult gains Optional<PolicyDiffResult> diff (present only for NEW_VERSION; empty for FIRST_VERSION/UNCHANGED; no JPA entities exposed)
+- PolicyVersionRepository gains findByPolicy_IdAndVersionNumber (derived query, no migration) for predecessor lookup
+- PolicyObservationService coordinates previous (N-1) + new (N) persisted contents through the pure PolicyDiffEngine; diff engine untouched, PolicyVersionService untouched; FIRST_VERSION/UNCHANGED never invoke diff or predecessor lookup
+- PolicyDiffConfiguration exposes the stateless engine as a Spring bean (engine class stays Spring-free)
+- Still NOT @Transactional: predecessor read runs in its own short read transaction; HTTP fetch never inside a DB transaction
+- Diff-failure rule: version persistence stands, the failure propagates, no fake empty diff and no recovery system in this slice
+- PolicyObservationServiceDiffTest (8 deterministic Mockito unit tests) + PolicyObservationDiffIntegrationTest (Testcontainers end-to-end with counting diff decorator: v1 FIRST_VERSION no diff/no invocation → reformatted UNCHANGED no diff/no invocation → wording NEW_VERSION v2 with 2 MODIFIED changes, v1 immutable)
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
+- Persistent diff/change records (diff stays application-level)
 - SimHash / near-duplicate handling (if still planned)
-- Diff-to-version integration (wiring the diff engine into version observation)
 - Classification / concepts / impact / recommendations / scheduler / notifications
 
 ## Next Phase
@@ -193,7 +202,13 @@ Phase 2I — Deterministic Policy Diff Engine is DONE:
 - Deterministic unit tests + golden privacy-policy test — DONE
 - Observation pipeline untouched (no diff wiring; integration is the next slice) — DONE
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, diff-to-version integration, SimHash if still planned, and later pipeline stages).
+Phase 2J — Diff-to-Version Integration is DONE:
+- Optional diff on PolicyObservationResult + predecessor lookup — DONE
+- Orchestrator coordinates persisted versions through the pure diff engine — DONE
+- Diff engine and version service behavior unchanged — DONE
+- Mockito unit tests + Testcontainers end-to-end test — DONE
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, persistent diff records, SimHash if still planned, and later pipeline stages).
 
 ## Current Status
 
@@ -269,6 +284,13 @@ with conservative MODIFIED rule, 21 deterministic unit tests and a
 golden privacy-policy test pinning V1→V2 to exactly 3 MODIFIED changes;
 observation pipeline untouched).
 
+Phase 2J slice implemented and tested successfully
+(orchestrator diffs persisted Version N-1 versus Version N contents
+through the untouched pure diff engine with the diff exposed as an
+optional application-level result, 8 Mockito unit tests plus a
+Testcontainers end-to-end test proving FIRST_VERSION/UNCHANGED carry
+no diff and NEW_VERSION carries the expected MODIFIED changes).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 Phase 2A — COMPLETE
@@ -280,15 +302,16 @@ Phase 2F — COMPLETE
 Phase 2G — COMPLETE
 Phase 2H — COMPLETE
 Phase 2I — COMPLETE
+Phase 2J — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
-- diff-to-version integration
-- SimHash/near-duplicate handling if still planned
+- persistent diff/change records if required by architecture
+- SimHash/near-duplicate handling
 - privacy concept matching
 - impact analysis
 - personalized assessment
 - recommendations
-- PolicyFetchAttempt/observation attempt tracking
+- PolicyFetchAttempt
 - scheduling
 - notifications
 
@@ -296,7 +319,7 @@ Do not mark Phase 2 complete yet.
 
 ## Next Action
 
-The next implementation task is the next Phase 2 slice (diff-to-version
-integration and later pipeline stages),
+The next implementation task is the next Phase 2 slice (persistent diff
+records and later pipeline stages),
 as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2J without explicit instruction.
+Do not begin Phase 2K without explicit instruction.
