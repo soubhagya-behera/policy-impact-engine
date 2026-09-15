@@ -96,11 +96,19 @@ Completed (Phase 2F — Content Hashing):
 - PolicyNormalizationHashingIntegrationTest (2 pipeline tests: noisy formatting → normalizer → canonical → hasher → stable hash; same formatting noise yields same normalized text and same hash; raw-hash divergence; null/empty equivalence)
 - DefaultPolicyTextNormalizer, JsoupPolicyContentExtractor and HttpPolicyFetcher unchanged (no extraction/fetch/normalization regressions)
 
+Completed (Phase 2G — Version Persistence & Exact Change Detection):
+- Flyway V2 policy_version schema (immutable, append-only; unique constraint on policy_id + version_number; per-policy latest lookup index; V1 untouched)
+- PolicyVersion immutable JPA entity (policy/domain, UUID id, parent Policy, per-policy version number, content hash, normalized TEXT content, observed_at; no setters, all columns updatable=false)
+- PolicyVersionRepository (latest-version lookup + sequence-order listing only; no update/delete operations)
+- PolicyVersionService observe(policyId, normalizedContent, contentHash) (FIRST_VERSION / UNCHANGED / NEW_VERSION; no fetch/extract/normalize/hash inside; database unique constraint as the concurrency guard, retry owned by future orchestration)
+- PolicyVersionObservation result record + PolicyVersionObservationOutcome enum
+- PolicyVersionRepositoryTest (7 Testcontainers tests) + PolicyVersionServiceTest (14 Testcontainers tests) — 168 tests passing, BUILD SUCCESS
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
 - SimHash / near-duplicate handling (if still planned)
-- PolicyVersion / versioning / persistence
-- Diff / change detection / version comparison
+- Policy observation orchestration/integration (scheduler/manual check wiring fetch → extract → normalize → hash → observe)
+- Diff / textual version comparison
 - Classification / concepts / impact / recommendations / scheduler / notifications
 
 ## Next Phase
@@ -153,7 +161,15 @@ Phase 2F — Content Hashing is DONE:
 - PolicyNormalizationHashingIntegrationTest (raw noisy → normalizer → hasher pipeline, formatting-noise stability, raw-hash divergence, null/empty) — DONE
 - Extraction, fetch and normalization behavior unchanged — DONE
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, versioning/persistence, change detection, SimHash if still planned, and later pipeline stages).
+Phase 2G — Version Persistence & Exact Change Detection is DONE:
+- Flyway V2 policy_version schema — DONE
+- PolicyVersion immutable entity — DONE
+- PolicyVersionRepository (latest lookup + ordered listing) — DONE
+- PolicyVersionService observe with FIRST_VERSION/UNCHANGED/NEW_VERSION — DONE
+- Unique (policy_id, version_number) concurrency guard — DONE
+- Testcontainers repository + service tests — DONE (168 tests passing)
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, observation orchestration/integration, SimHash if still planned, and later pipeline stages).
 
 ## Current Status
 
@@ -209,6 +225,13 @@ Sha256PolicyContentHasherTest + PolicyNormalizationHashingIntegrationTest —
 deterministic unit/integration tests without network/DB,
 extraction/fetch/normalization untouched).
 
+Phase 2G slice implemented and tested successfully
+(Flyway V2 policy_version schema, immutable PolicyVersion entity,
+PolicyVersionRepository latest/ordered lookups, PolicyVersionService
+observe with FIRST_VERSION/UNCHANGED/NEW_VERSION exact hash detection,
+unique (policy_id, version_number) concurrency guard,
+Testcontainers repository + service tests — 168 tests passing).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 Phase 2A — COMPLETE
@@ -217,17 +240,22 @@ Phase 2C — COMPLETE
 Phase 2D — COMPLETE
 Phase 2E — COMPLETE
 Phase 2F — COMPLETE
+Phase 2G — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
-- policy versioning/persistence
-- change detection/version comparison
+- policy observation orchestration/integration (fetch → extract → normalize → hash → observe wiring)
+- textual diffing
 - SimHash/near-duplicate handling if still planned
-- integration/acceptance flow
+- concept matching
+- impact analysis
+- recommendations
+- notification/scheduling
 
 Do not mark Phase 2 complete yet.
 
 ## Next Action
 
-The next implementation task is the next Phase 2 slice (redirect revalidation /
-hashing/versioning and later pipeline stages), as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2F without explicit instruction.
+The next implementation task is the next Phase 2 slice (observation
+orchestration/integration, textual diffing, and later pipeline stages),
+as scoped in ARCHITECTURE.md §31.
+Do not begin Phase 2H without explicit instruction.
