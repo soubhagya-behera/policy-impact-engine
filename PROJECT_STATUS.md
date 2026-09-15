@@ -89,11 +89,19 @@ Completed (Phase 2E — Text Normalization):
 - DefaultPolicyTextNormalizerTest (14 deterministic inline-string tests, no network/DB)
 - JsoupPolicyContentExtractor and HttpPolicyFetcher unchanged (no extraction/fetch regressions)
 
+Completed (Phase 2F — Content Hashing):
+- PolicyContentHasher abstraction (single hash method, plain Java, no Spring/DB/HTTP/security/user/clock/randomness)
+- Sha256PolicyContentHasher (JDK MessageDigest SHA-256, UTF-8 bytes explicitly, lowercase hex, deterministic/stateless/thread-safe, null→hash of empty string)
+- Sha256PolicyContentHasherTest (8 deterministic unit tests: empty vector, ASCII vectors, Unicode, determinism, lowercase hex 64-char, different-content divergence, whitespace non-normalization)
+- PolicyNormalizationHashingIntegrationTest (2 pipeline tests: noisy formatting → normalizer → canonical → hasher → stable hash; same formatting noise yields same normalized text and same hash; raw-hash divergence; null/empty equivalence)
+- DefaultPolicyTextNormalizer, JsoupPolicyContentExtractor and HttpPolicyFetcher unchanged (no extraction/fetch/normalization regressions)
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
-- SHA-256 / SimHash
-- PolicyVersion / versioning
-- Diff / classification / concepts / impact / recommendations / scheduler / notifications
+- SimHash / near-duplicate handling (if still planned)
+- PolicyVersion / versioning / persistence
+- Diff / change detection / version comparison
+- Classification / concepts / impact / recommendations / scheduler / notifications
 
 ## Next Phase
 
@@ -139,7 +147,13 @@ Phase 2E — Text Normalization is DONE:
 - DefaultPolicyTextNormalizerTest (null, empty, whitespace-only, LF/CRLF/CR, trim, space/tab collapse, blank-line collapse, punctuation/case/word-boundary preservation, paragraph separation, idempotence, deterministic fixture) — DONE
 - Extraction and fetch behavior unchanged — DONE (137 tests passing)
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, hashing/versioning and later pipeline stages).
+Phase 2F — Content Hashing is DONE:
+- PolicyContentHasher/Sha256PolicyContentHasher — DONE
+- Sha256PolicyContentHasherTest (empty/ASCII known vectors, Unicode UTF-8, determinism, lowercase hex, different-content, whitespace non-normalization) — DONE
+- PolicyNormalizationHashingIntegrationTest (raw noisy → normalizer → hasher pipeline, formatting-noise stability, raw-hash divergence, null/empty) — DONE
+- Extraction, fetch and normalization behavior unchanged — DONE
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation, versioning/persistence, change detection, SimHash if still planned, and later pipeline stages).
 
 ## Current Status
 
@@ -189,7 +203,28 @@ Phase 2E slice implemented and tested successfully
 DefaultPolicyTextNormalizerTest — deterministic inline-string tests without
 network/DB, extraction and fetch untouched — 137 tests passing).
 
+Phase 2F slice implemented and tested successfully
+(PolicyContentHasher + Sha256PolicyContentHasher with
+Sha256PolicyContentHasherTest + PolicyNormalizationHashingIntegrationTest —
+deterministic unit/integration tests without network/DB,
+extraction/fetch/normalization untouched).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
+
+Phase 2A — COMPLETE
+Phase 2B — COMPLETE
+Phase 2C — COMPLETE
+Phase 2D — COMPLETE
+Phase 2E — COMPLETE
+Phase 2F — COMPLETE
+
+Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
+- policy versioning/persistence
+- change detection/version comparison
+- SimHash/near-duplicate handling if still planned
+- integration/acceptance flow
+
+Do not mark Phase 2 complete yet.
 
 ## Next Action
 
