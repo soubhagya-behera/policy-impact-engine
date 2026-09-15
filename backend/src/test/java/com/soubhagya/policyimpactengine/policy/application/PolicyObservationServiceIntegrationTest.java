@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -18,6 +19,9 @@ import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
+import com.soubhagya.policyimpactengine.diff.LineBasedPolicyDiffEngine;
+import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
+import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.policy.fetch.DefaultPolicyTextNormalizer;
 import com.soubhagya.policyimpactengine.policy.fetch.FetchResult;
 import com.soubhagya.policyimpactengine.policy.fetch.JsoupPolicyContentExtractor;
@@ -54,12 +58,22 @@ class PolicyObservationServiceIntegrationTest {
 	@Autowired
 	private PolicyVersionService versionService;
 
+	@Autowired
+	private PolicyDiffEngine diffEngine;
+
+	@Autowired
+	private PolicyChangeRecordRepository changeRepository;
+
+	@Autowired
+	private PlatformTransactionManager transactionManager;
+
 	private final PolicyContentExtractor extractor = new JsoupPolicyContentExtractor();
 	private final PolicyTextNormalizer normalizer = new DefaultPolicyTextNormalizer();
 	private final PolicyContentHasher hasher = new Sha256PolicyContentHasher();
 
 	@BeforeEach
 	void cleanDatabase() {
+		changeRepository.deleteAll();
 		versionRepository.deleteAll();
 		policyRepository.deleteAll();
 	}
@@ -82,8 +96,10 @@ class PolicyObservationServiceIntegrationTest {
 		assertThat(reformattedNormalized).isEqualTo(firstNormalized);
 
 		StubPolicyFetcher stubFetcher = new StubPolicyFetcher(firstHtml);
+		PolicyObservationPersistenceService persistenceService = new PolicyObservationPersistenceService(
+				versionService, versionRepository, diffEngine, changeRepository, transactionManager);
 		PolicyObservationService orchestrator = new PolicyObservationService(
-				policyRepository, stubFetcher, extractor, normalizer, hasher, versionService);
+				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService);
 
 		PolicyObservationResult first = orchestrator.observe(policy.getId());
 		assertThat(first.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -20,6 +21,7 @@ import com.soubhagya.policyimpactengine.diff.PolicyChange;
 import com.soubhagya.policyimpactengine.diff.PolicyChangeType;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
+import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
@@ -62,12 +64,19 @@ class PolicyObservationDiffIntegrationTest {
 	@Autowired
 	private PolicyVersionService versionService;
 
+	@Autowired
+	private PolicyChangeRecordRepository changeRepository;
+
+	@Autowired
+	private PlatformTransactionManager transactionManager;
+
 	private final PolicyContentExtractor extractor = new JsoupPolicyContentExtractor();
 	private final PolicyTextNormalizer normalizer = new DefaultPolicyTextNormalizer();
 	private final PolicyContentHasher hasher = new Sha256PolicyContentHasher();
 
 	@BeforeEach
 	void cleanDatabase() {
+		changeRepository.deleteAll();
 		versionRepository.deleteAll();
 		policyRepository.deleteAll();
 	}
@@ -104,9 +113,10 @@ class PolicyObservationDiffIntegrationTest {
 
 		StubPolicyFetcher stubFetcher = new StubPolicyFetcher(firstHtml);
 		CountingDiffEngine countingDiff = new CountingDiffEngine(new LineBasedPolicyDiffEngine());
+		PolicyObservationPersistenceService persistenceService = new PolicyObservationPersistenceService(
+				versionService, versionRepository, countingDiff, changeRepository, transactionManager);
 		PolicyObservationService orchestrator = new PolicyObservationService(
-				policyRepository, stubFetcher, extractor, normalizer, hasher, versionService,
-				versionRepository, countingDiff);
+				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService);
 
 		PolicyObservationResult first = orchestrator.observe(policy.getId());
 		assertThat(first.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);

@@ -127,6 +127,16 @@ Completed (Phase 2J — Diff-to-Version Integration):
 - Diff-failure rule: version persistence stands, the failure propagates, no fake empty diff and no recovery system in this slice
 - PolicyObservationServiceDiffTest (8 deterministic Mockito unit tests) + PolicyObservationDiffIntegrationTest (Testcontainers end-to-end with counting diff decorator: v1 FIRST_VERSION no diff/no invocation → reformatted UNCHANGED no diff/no invocation → wording NEW_VERSION v2 with 2 MODIFIED changes, v1 immutable)
 
+Completed (Phase 2K — Persist Policy Changes):
+- Flyway V3 policy_change schema (immutable, append-only; FKs to previous/new PolicyVersion; CHECK on change_type + null-shape + change_order; UNIQUE on new_version_id + change_order as the document-order guard and retrieval index; V1/V2 untouched)
+- PolicyChangeRecord immutable JPA entity in diff.domain (constructor-fixed, no setters, all columns updatable=false; changeOrder is the zero-based document position; owning policy answered via versions, no duplicated policy_id)
+- PolicyChangeRecordRepository (save support + findByNewVersion_IdOrderByChangeOrderAsc only; no diff logic, no update/delete)
+- PolicyObservationPersistenceService owns the single short persistence transaction AFTER the fetch: observe version (joins tx) → load predecessor N-1 → pure diff → saveAll+flush changes in order; HTTP fetch stays outside the transaction, the pure diff runs inside with no I/O
+- PolicyObservationService is now a thin non-transactional orchestrator: load → fetch → extract → normalize → hash → persistenceService.store
+- Atomicity: version N and its change rows commit/rollback together; change-persistence or diff failure propagates with no successful result and no partial version row (retry re-attempts the whole transition)
+- Empty diff for NEW_VERSION persists zero rows explicitly (no invented change) and still carries the present empty diff; FIRST_VERSION/UNCHANGED never invoke diff and persist nothing
+- PolicyChangeRecordRepositoryTest (Testcontainers repository tests) + PolicyChangePersistenceIntegrationTest (Testcontainers end-to-end v1→v2→v3 with stub fetcher, atomic-rollback and empty-diff cases) plus updated orchestrator/persistence unit tests
+
 Not yet implemented:
 - Redirect revalidation (redirects remain disabled)
 - Persistent diff/change records (diff stays application-level)
@@ -207,6 +217,14 @@ Phase 2J — Diff-to-Version Integration is DONE:
 - Orchestrator coordinates persisted versions through the pure diff engine — DONE
 - Diff engine and version service behavior unchanged — DONE
 - Mockito unit tests + Testcontainers end-to-end test — DONE
+
+Phase 2K — Persist Policy Changes is DONE:
+- Flyway V3 policy_change schema — DONE
+- Immutable PolicyChangeRecord entity + minimal repository — DONE
+- Single version-plus-changes transaction after the fetch (fetch never inside a DB transaction) — DONE
+- NEW_VERSION diff persisted in deterministic order; FIRST_VERSION/UNCHANGED persist nothing — DONE
+- Empty diff persists zero rows explicitly; failures propagate with rollback, no false success — DONE
+- Testcontainers repository + end-to-end persistence tests — DONE
 
 Remaining Phase 2 scope will be built in later slices (redirect revalidation, persistent diff records, SimHash if still planned, and later pipeline stages).
 
@@ -291,6 +309,17 @@ optional application-level result, 8 Mockito unit tests plus a
 Testcontainers end-to-end test proving FIRST_VERSION/UNCHANGED carry
 no diff and NEW_VERSION carries the expected MODIFIED changes).
 
+Phase 2K slice implemented and tested successfully
+(Flyway V3 policy_change schema, immutable PolicyChangeRecord entity
+with minimal ordered repository, single version-plus-changes
+transaction owned by PolicyObservationPersistenceService with the fetch
+outside the transaction, thin non-transactional PolicyObservationService
+orchestrator, NEW_VERSION changes persisted in deterministic document
+order with FIRST_VERSION/UNCHANGED persisting nothing, empty diff
+persisting zero rows explicitly, failures propagating with rollback and
+no false success, Testcontainers repository + end-to-end persistence
+tests).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 Phase 2A — COMPLETE
@@ -303,9 +332,9 @@ Phase 2G — COMPLETE
 Phase 2H — COMPLETE
 Phase 2I — COMPLETE
 Phase 2J — COMPLETE
+Phase 2K — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
-- persistent diff/change records if required by architecture
 - SimHash/near-duplicate handling
 - privacy concept matching
 - impact analysis

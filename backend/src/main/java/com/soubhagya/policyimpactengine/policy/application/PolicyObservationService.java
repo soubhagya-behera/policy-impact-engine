@@ -1,17 +1,12 @@
 package com.soubhagya.policyimpactengine.policy.application;
 
 import java.util.NoSuchElementException;
-import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
-import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
-import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
-import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
-import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
 import com.soubhagya.policyimpactengine.policy.fetch.FetchResult;
 import com.soubhagya.policyimpactengine.policy.fetch.PolicyContentExtractor;
 import com.soubhagya.policyimpactengine.policy.fetch.PolicyContentHasher;
@@ -25,50 +20,39 @@ import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
  * reimplementing any of them:
  *
  * <pre>
- * load policy → fetch → extract → normalize → hash → observe version → diff (NEW_VERSION only)
+ * load policy → fetch → extract → normalize → hash → persist (version + changes)
  * </pre>
  *
  * <p>No URL validation, SSRF logic, response-size handling, HTML parsing,
- * normalization, hashing, version comparison, or diff computation lives
- * here; each stage is owned by its injected abstraction. The diff engine
- * stays pure: this layer loads the two persisted version contents and
- * invokes it, and the engine never sees repositories or entities.
- *
- * <p>Diff behavior by outcome:
- * <ul>
- * <li>{@code FIRST_VERSION} — no previous version exists; the diff engine
- * is not called and the result carries no diff.</li>
- * <li>{@code UNCHANGED} — no new version was created; the diff engine is
- * not called and the result carries no diff.</li>
- * <li>{@code NEW_VERSION} — the normalized content of the previous
- * version (number N&nbsp;-&nbsp;1) is diffed against the normalized
- * content of the newly created version (number N); the result carries
- * the actual {@link PolicyDiffResult}.</li>
- * </ul>
+ * normalization, hashing, version comparison, diff computation, or change
+ * persistence lives here; each stage is owned by its injected abstraction.
+ * Diff-to-version integration and change-record persistence are owned by
+ * {@link PolicyObservationPersistenceService}: for {@code NEW_VERSION} the
+ * normalized content of the previous version (number N&nbsp;-&nbsp;1) is
+ * diffed against the new version (number N) and the resulting changes are
+ * persisted in deterministic document order. {@code FIRST_VERSION} and
+ * {@code UNCHANGED} persist no change rows and carry no diff.
  *
  * <p><b>Transaction boundary:</b> this method is deliberately NOT
  * {@code @Transactional}. The policy lookup runs in the repository's own
  * short read transaction, the external HTTP fetch then executes with no
- * database transaction held open, {@link PolicyVersionService} owns
- * its persistence transaction for the observe step, and the predecessor
- * read after a new version runs in its own short read transaction. A
- * single transaction spanning lookup → network → parse → hash → persist
- * → diff would hold a database connection across an unbounded external
- * call.
+ * database transaction held open, and
+ * {@link PolicyObservationPersistenceService#store} owns the single short
+ * persistence transaction (version creation plus change persistence, with
+ * the pure in-memory diff inside it and no network I/O). A single
+ * transaction spanning lookup → network → parse → hash → persist would hold
+ * a database connection across an unbounded external call.
  *
- * <p><b>Diff-failure rule:</b> if version persistence succeeds but the
- * subsequent diff computation fails, the failure propagates to the caller
- * unchanged — the persisted version remains (the observation genuinely
- * happened; retrying with the same content converges to
- * {@code UNCHANGED}), and no fake empty diff or fake outcome is returned.
- * There is no recovery system in this slice.
- *
- * <p>Other failures propagate unchanged: missing policy surfaces
- * {@link NoSuchElementException} (the existing service/repository
- * not-found convention), fetch failures propagate the existing fetch
- * exception, and extraction/normalization/hashing failures propagate to
- * the caller. No generic exception hierarchy is introduced and no fake
- * outcome is returned for exceptions.
+ * <p><b>Failure rules:</b> persistence failures propagate unchanged through
+ * the persistence service — the transaction rolls back version and changes
+ * together, so no successful result is returned that would falsely imply
+ * the complete transition was persisted. Other failures propagate unchanged
+ * as before: missing policy surfaces {@link NoSuchElementException} (the
+ * existing service/repository not-found convention), fetch failures
+ * propagate the existing fetch exception, and
+ * extraction/normalization/hashing failures propagate to the caller. No
+ * generic exception hierarchy is introduced and no fake outcome is returned
+ * for exceptions.
  */
 @Service
 public class PolicyObservationService {
@@ -78,9 +62,7 @@ public class PolicyObservationService {
 	private final PolicyContentExtractor extractor;
 	private final PolicyTextNormalizer normalizer;
 	private final PolicyContentHasher hasher;
-	private final PolicyVersionService versionService;
-	private final PolicyVersionRepository versionRepository;
-	private final PolicyDiffEngine diffEngine;
+	private final PolicyObservationPersistenceService persistenceService;
 
 	public PolicyObservationService(
 			PolicyRepository policyRepository,
@@ -88,9 +70,7 @@ public class PolicyObservationService {
 			PolicyContentExtractor extractor,
 			PolicyTextNormalizer normalizer,
 			PolicyContentHasher hasher,
-			PolicyVersionService versionService,
-			PolicyVersionRepository versionRepository,
-			PolicyDiffEngine diffEngine) {
+			PolicyObservationPersistenceService persistenceService) {
 		if (policyRepository == null) {
 			throw new IllegalArgumentException("PolicyRepository must not be null");
 		}
@@ -106,23 +86,15 @@ public class PolicyObservationService {
 		if (hasher == null) {
 			throw new IllegalArgumentException("PolicyContentHasher must not be null");
 		}
-		if (versionService == null) {
-			throw new IllegalArgumentException("PolicyVersionService must not be null");
-		}
-		if (versionRepository == null) {
-			throw new IllegalArgumentException("PolicyVersionRepository must not be null");
-		}
-		if (diffEngine == null) {
-			throw new IllegalArgumentException("PolicyDiffEngine must not be null");
+		if (persistenceService == null) {
+			throw new IllegalArgumentException("PolicyObservationPersistenceService must not be null");
 		}
 		this.policyRepository = policyRepository;
 		this.fetcher = fetcher;
 		this.extractor = extractor;
 		this.normalizer = normalizer;
 		this.hasher = hasher;
-		this.versionService = versionService;
-		this.versionRepository = versionRepository;
-		this.diffEngine = diffEngine;
+		this.persistenceService = persistenceService;
 	}
 
 	/**
@@ -145,32 +117,6 @@ public class PolicyObservationService {
 		String normalized = normalizer.normalize(extracted);
 		String hash = hasher.hash(normalized);
 
-		PolicyVersionObservation observation = versionService.observe(policyId, normalized, hash);
-
-		if (observation.outcome() != PolicyVersionObservationOutcome.NEW_VERSION) {
-			return new PolicyObservationResult(
-					policyId,
-					observation.outcome(),
-					observation.version().getVersionNumber(),
-					observation.version().getContentHash(),
-					Optional.empty());
-		}
-
-		PolicyVersion created = observation.version();
-		PolicyVersion previous = versionRepository
-				.findByPolicy_IdAndVersionNumber(policyId, created.getVersionNumber() - 1)
-				.orElseThrow(() -> new IllegalStateException(
-						"Previous version " + (created.getVersionNumber() - 1)
-								+ " of policy " + policyId + " not found for diffing"));
-
-		PolicyDiffResult diff = diffEngine.diff(
-				previous.getNormalizedContent(), created.getNormalizedContent());
-
-		return new PolicyObservationResult(
-				policyId,
-				observation.outcome(),
-				created.getVersionNumber(),
-				created.getContentHash(),
-				Optional.of(diff));
+		return persistenceService.store(policyId, normalized, hash);
 	}
 }
