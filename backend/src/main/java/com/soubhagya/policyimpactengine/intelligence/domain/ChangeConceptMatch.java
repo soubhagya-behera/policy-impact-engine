@@ -43,7 +43,7 @@ public class ChangeConceptMatch {
 	@Column(nullable = false, updatable = false)
 	private UUID id;
 
-	@ManyToOne(fetch = FetchType.LAZY, optional = false)
+	@ManyToOne(fetch = FetchType.EAGER, optional = false)
 	@JoinColumn(name = "change_id", nullable = false, updatable = false)
 	private PolicyChangeRecord change;
 

@@ -19,6 +19,11 @@ import com.soubhagya.policyimpactengine.diff.SimHashDistance;
 import com.soubhagya.policyimpactengine.diff.SimHashSimilarity;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecord;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
+import com.soubhagya.policyimpactengine.impact.DeterministicImpactScoringEngine;
+import com.soubhagya.policyimpactengine.impact.ImpactScoringEngine;
+import com.soubhagya.policyimpactengine.impact.domain.ChangeImpact;
+import com.soubhagya.policyimpactengine.impact.domain.ChangeImpactRepository;
+import com.soubhagya.policyimpactengine.impact.domain.ImpactScore;
 import com.soubhagya.policyimpactengine.intelligence.ConceptMatch;
 import com.soubhagya.policyimpactengine.intelligence.ConceptMatcher;
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatch;
@@ -29,9 +34,10 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
 
 /**
- * Phase 2K/2M/2N — owns the single persistence transaction for a policy
- * observation: version creation plus change-record and concept-match
- * persistence, plus the SimHash similarity signal for {@code NEW_VERSION}.
+ * Phase 2K/2M/2N/2O — owns the single persistence transaction for a policy
+ * observation: version creation plus change-record, concept-match and
+ * system-level change-impact persistence, plus the SimHash similarity
+ * signal for {@code NEW_VERSION}.
  *
  * <p><b>Transaction boundary.</b> {@link #store} is the only persistence
  * entry point of the observation path. The caller
@@ -43,28 +49,33 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
  * is constructed):
  *
  * <pre>
- * observe version (joins this transaction) → load predecessor N-1 → pure diff → persist changes → concept matching → persist matches
+ * observe version (joins this transaction) → load predecessor N-1 → pure diff → persist changes → concept matching → persist matches → scoring → persist impacts
  * </pre>
  *
  * <p>{@link PolicyVersionService#observe} uses {@code REQUIRED} propagation,
  * so when called from inside {@link #store} it joins this transaction rather
- * than committing separately. Version N, its change rows and the resulting
- * concept-match rows therefore commit or roll back together: a diff failure,
- * change-persistence failure or concept-match failure rolls back the version
- * insert as well, so the database never holds a version whose transition has
- * no change or match records. The pure in-memory diff and pure concept
- * matcher run inside the transaction, but they perform no I/O; the unbounded
- * external fetch stays outside, preserving the existing rule that HTTP
- * fetching must not happen inside a long-running database transaction.
+ * than committing separately. Version N, its change rows, the resulting
+ * concept-match rows and the system-level impact rows therefore commit or
+ * roll back together: a diff failure, change-persistence failure,
+ * concept-match failure or impact-scoring failure rolls back the version
+ * insert as well, so the database never holds a version whose transition
+ * has no change, match or impact records. The pure in-memory diff, pure
+ * concept matcher and pure scoring engine run inside the transaction, but
+ * they perform no I/O; the unbounded external fetch stays outside,
+ * preserving the existing rule that HTTP fetching must not happen inside a
+ * long-running database transaction.
  *
  * <p><b>Ordering.</b> Version N is created first, the previous version N-1
  * is identified, the diff is calculated, and the resulting records are
  * persisted in deterministic document order ({@code changeOrder} is the
  * zero-based diff index). Then, for each persisted change, deterministic
  * concept matching scans its old/new texts and persists at most one row per
- * (change, concept) in concept-code order. {@code FIRST_VERSION} and
- * {@code UNCHANGED} never invoke the diff engine or concept matcher and
- * persist no rows, and no artificial "unchanged" change is ever stored.
+ * (change, concept) in concept-code order. Finally, each match is scored
+ * deterministically and the resulting ChangeImpact rows are persisted in
+ * the same order (changeOrder then conceptCode). {@code FIRST_VERSION} and
+ * {@code UNCHANGED} never invoke the diff engine, concept matcher or
+ * scoring engine and persist no rows, and no artificial "unchanged" change
+ * is ever stored.
  *
  * <p><b>Empty diff.</b> A {@code NEW_VERSION} outcome means the content hash
  * differed, so the diff is expected to be non-empty. If the engine somehow
@@ -85,6 +96,14 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
  * oldText/newText, pattern id, match kind) and are persisted in the same
  * transaction as version and changes, ordered by concept code. The matcher
  * is a pure Java component with no DB/I/O/clock/randomness.
+ *
+ * <p><b>Phase 2O — system impact.</b> For {@code NEW_VERSION} only, each
+ * persisted ChangeConceptMatch is scored deterministically:
+ * {@code baseScore = conceptWeight × changeTypeMultiplier},
+ * {@code normalized = min(100, round(baseScore×10))}, band derived from
+ * normalized. Snapshots are persisted as ChangeImpact in the same
+ * transaction, one per match, rulesVersion=1, sectionCriticality fixed at
+ * 1, default_sensitivity not used (reserved for personalized phase).
  *
  * <p><b>Phase 2M — SimHash similarity.</b> For {@code NEW_VERSION} only, a
  * numerical similarity signal is produced from the persisted/new normalized
@@ -117,6 +136,8 @@ public class PolicyObservationPersistenceService {
 	private final PrivacyConceptRepository conceptRepository;
 	private final ChangeConceptMatchRepository matchRepository;
 	private final ConceptMatcher conceptMatcher;
+	private final ChangeImpactRepository impactRepository;
+	private final ImpactScoringEngine scoringEngine;
 	private final TransactionTemplate transactionTemplate;
 
 	public PolicyObservationPersistenceService(
@@ -127,8 +148,22 @@ public class PolicyObservationPersistenceService {
 			PolicySimHash simHash,
 			PlatformTransactionManager transactionManager) {
 		this(versionService, versionRepository, diffEngine, changeRepository, simHash, null, null,
-				new com.soubhagya.policyimpactengine.intelligence.DeterministicConceptMatcher(),
-				transactionManager);
+				new com.soubhagya.policyimpactengine.intelligence.DeterministicConceptMatcher(), null,
+				new DeterministicImpactScoringEngine(), transactionManager);
+	}
+
+	public PolicyObservationPersistenceService(
+			PolicyVersionService versionService,
+			PolicyVersionRepository versionRepository,
+			PolicyDiffEngine diffEngine,
+			PolicyChangeRecordRepository changeRepository,
+			PolicySimHash simHash,
+			PrivacyConceptRepository conceptRepository,
+			ChangeConceptMatchRepository matchRepository,
+			ConceptMatcher conceptMatcher,
+			PlatformTransactionManager transactionManager) {
+		this(versionService, versionRepository, diffEngine, changeRepository, simHash, conceptRepository,
+				matchRepository, conceptMatcher, null, new DeterministicImpactScoringEngine(), transactionManager);
 	}
 
 	@Autowired
@@ -141,6 +176,8 @@ public class PolicyObservationPersistenceService {
 			PrivacyConceptRepository conceptRepository,
 			ChangeConceptMatchRepository matchRepository,
 			ConceptMatcher conceptMatcher,
+			ChangeImpactRepository impactRepository,
+			ImpactScoringEngine scoringEngine,
 			PlatformTransactionManager transactionManager) {
 		if (versionService == null) {
 			throw new IllegalArgumentException("PolicyVersionService must not be null");
@@ -170,6 +207,8 @@ public class PolicyObservationPersistenceService {
 		this.conceptMatcher = conceptMatcher != null
 				? conceptMatcher
 				: new com.soubhagya.policyimpactengine.intelligence.DeterministicConceptMatcher();
+		this.impactRepository = impactRepository;
+		this.scoringEngine = scoringEngine != null ? scoringEngine : new DeterministicImpactScoringEngine();
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
@@ -268,6 +307,20 @@ public class PolicyObservationPersistenceService {
 							.thenComparing(m -> m.getConcept().getCode()));
 					matchRepository.saveAll(matches);
 					matchRepository.flush();
+				}
+
+				// System-level impact scoring inside same TX: one ChangeImpact per match.
+				if (!matches.isEmpty() && impactRepository != null) {
+					List<ChangeImpact> impacts = new ArrayList<>(matches.size());
+					for (ChangeConceptMatch m : matches) {
+						ImpactScore score = scoringEngine.score(m.getChange(), m);
+						impacts.add(new ChangeImpact(m, score.conceptCode(), score.changeType(),
+								score.conceptWeight(), score.changeTypeMultiplier(), score.baseScore(),
+								score.normalizedScore(), score.impactBand(), score.rulesVersion()));
+					}
+					// Deterministic order already from matches sorting.
+					impactRepository.saveAll(impacts);
+					impactRepository.flush();
 				}
 			}
 
