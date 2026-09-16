@@ -244,6 +244,18 @@ Phase 2M — SimHash Integration as Similarity Signal ONLY is DONE:
 - Application orchestration coordinates existing SimHash + SimHashDistance over persisted normalized contents outside the version+changes transaction — DONE
 - Deterministic unit tests (9 cases) + Testcontainers PostgreSQL integration test (v1 FIRST no similarity → reformatted UNCHANGED no similarity → wording NEW_VERSION diff+similarity, SHA/version/change unaffected, deterministic) — DONE
 
+Completed (Phase 2N — Privacy Concept Vocabulary & Deterministic Concept Matching):
+- Flyway V4 privacy_concept + change_concept_match schema (immutable, append-only; unique code on privacy_concept, unique on change_concept_match (change_id, concept_id) as deterministic dedup guard; V1/V2/V3 untouched)
+- privacy_concept seed vocabulary 9 concepts (LOCATION, THIRD_PARTY_SHARING, ADVERTISING, DATA_RETENTION, DELETION_RIGHTS, COOKIES, CHILDREN_DATA, ARBITRATION, LEGAL_BASIS) with label/description/weight/sensitivity
+- PrivacyConcept immutable JPA entity (policy/intelligence domain, UUID id, code unique, label, description, defaultWeight, defaultSensitivity, createdAt; no setters, updatable=false)
+- ChangeConceptMatch immutable JPA entity (intelligence/domain, UUID id, FKs to PolicyChangeRecord and PrivacyConcept, matched_fragment TEXT, pattern_id, match_kind, createdAt; no setters, updatable=false; change eager on concept for deterministic reads, unique on (change_id, concept_id))
+- PrivacyConceptRepository (findByCode, findAll) + ChangeConceptMatchRepository (findByChange_IdOrderByConcept_CodeAsc, findByConcept_IdOrderByChange_IdAsc; no matching logic)
+- ConceptMatcher abstraction + DeterministicConceptMatcher (pure JDK, CASE_INSENSITIVE|UNICODE_CASE|UNICODE_CHARACTER_CLASS regex, LinkedHashMap ordered concepts, one match per (change, concept) at most, matched_fragment is verbatim Matcher.group() substring of oldText/newText, no DB/HTTP/clock/randomness/LLM/embeddings)
+- PolicyObservationPersistenceService integrates concept matching inside the same short transaction as version+diff+changes: version observe → predecessor lookup → diff → persist changes → load concepts → match per change → persist ChangeConceptMatch in concept-code order; concept-match failure rolls back version+changes+matches together; SimHash remains outside transaction, unpersisted, SHA-256 authoritative
+- IntelligenceConfiguration exposes DeterministicConceptMatcher as Spring bean (matcher stays Spring-free)
+- DeterministicConceptMatcherTest (22 deterministic unit tests: location/third-party/advertising positives, hyphen/space variants, negative case, multi-concept, case-insensitive, punctuation, evidence substring, old/new/both handling, empty/null, deterministic ordering, Unicode, duplicate prevention, plus 4 golden pinning tests) + ConceptMatchRepositoryTest (Testcontainers: V4 applied, 9 seeds, ordered retrieval, unique violation)
+- ConceptMatchPersistenceIntegrationTest (Testcontainers PostgreSQL end-to-end: FIRST_VERSION no matches, UNCHANGED no matches, NEW_VERSION persists expected concepts with evidence/deterministic ordering and SimHash still present, repeat UNCHANGED no new matches, matcher failure rollback verifies no partial version/change/match rows) — 300 tests passing, BUILD SUCCESS
+
 Remaining Phase 2 scope will be built in later slices (redirect revalidation and later pipeline stages).
 
 ## Current Status
@@ -345,6 +357,22 @@ database, or pipeline wiring; SHA-256 unchanged as the exact-identity
 mechanism; deterministic inline-string unit tests including the
 SHA-256-vs-SimHash distinction demonstration with no threshold).
 
+Phase 2M slice implemented and tested successfully
+(SimHashSimilarity value object + PolicyObservationResult similarity field
+absent for FIRST/UNCHANGED, present for NEW_VERSION, never persisted;
+orchestration outside the version+changes transaction; deterministic unit
+tests plus Testcontainers integration test).
+
+Phase 2N slice implemented and tested successfully
+(Flyway V4 privacy_concept + change_concept_match with 9 seeded concepts
+LOCATION/THIRD_PARTY_SHARING/ADVERTISING/DATA_RETENTION/DELETION_RIGHTS/
+COOKIES/CHILDREN_DATA/ARBITRATION/LEGAL_BASIS, immutable entities,
+minimal repositories, pure DeterministicConceptMatcher with ordered
+regex keyword/phrase matching and verbatim evidence, same-transaction
+version+changes+concept-matches persistence with rollback, SimHash
+outside TX unchanged, Testcontainers repository + end-to-end tests
+— 300 tests passing).
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 Phase 2A — COMPLETE
@@ -360,10 +388,10 @@ Phase 2J — COMPLETE
 Phase 2K — COMPLETE
 Phase 2L — COMPLETE
 Phase 2M — COMPLETE
+Phase 2N — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- privacy concept matching
 - impact analysis
 - personalized assessment
 - recommendations
@@ -378,4 +406,4 @@ Do not mark Phase 2 complete yet.
 The next implementation task is the next Phase 2 slice (later pipeline
 stages),
 as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2M without explicit instruction.
+Do not begin Phase 2O without explicit instruction.

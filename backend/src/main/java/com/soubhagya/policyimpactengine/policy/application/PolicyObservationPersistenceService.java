@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -18,13 +19,19 @@ import com.soubhagya.policyimpactengine.diff.SimHashDistance;
 import com.soubhagya.policyimpactengine.diff.SimHashSimilarity;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecord;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
+import com.soubhagya.policyimpactengine.intelligence.ConceptMatch;
+import com.soubhagya.policyimpactengine.intelligence.ConceptMatcher;
+import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatch;
+import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRepository;
+import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConcept;
+import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConceptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
 
 /**
- * Phase 2K/2M — owns the single persistence transaction for a policy
- * observation: version creation plus change-record persistence, plus the
- * SimHash similarity signal for {@code NEW_VERSION}.
+ * Phase 2K/2M/2N — owns the single persistence transaction for a policy
+ * observation: version creation plus change-record and concept-match
+ * persistence, plus the SimHash similarity signal for {@code NEW_VERSION}.
  *
  * <p><b>Transaction boundary.</b> {@link #store} is the only persistence
  * entry point of the observation path. The caller
@@ -36,25 +43,28 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
  * is constructed):
  *
  * <pre>
- * observe version (joins this transaction) → load predecessor N-1 → pure diff → persist changes
+ * observe version (joins this transaction) → load predecessor N-1 → pure diff → persist changes → concept matching → persist matches
  * </pre>
  *
  * <p>{@link PolicyVersionService#observe} uses {@code REQUIRED} propagation,
  * so when called from inside {@link #store} it joins this transaction rather
- * than committing separately. Version N and its change rows therefore commit
- * or roll back together: a change-persistence or diff failure rolls back the
- * version insert as well, so the database never holds a version whose
- * transition has no change records. The pure in-memory diff runs inside the
- * transaction, but it performs no I/O; the unbounded external fetch stays
- * outside, preserving the existing rule that HTTP fetching must not happen
- * inside a long-running database transaction.
+ * than committing separately. Version N, its change rows and the resulting
+ * concept-match rows therefore commit or roll back together: a diff failure,
+ * change-persistence failure or concept-match failure rolls back the version
+ * insert as well, so the database never holds a version whose transition has
+ * no change or match records. The pure in-memory diff and pure concept
+ * matcher run inside the transaction, but they perform no I/O; the unbounded
+ * external fetch stays outside, preserving the existing rule that HTTP
+ * fetching must not happen inside a long-running database transaction.
  *
  * <p><b>Ordering.</b> Version N is created first, the previous version N-1
  * is identified, the diff is calculated, and the resulting records are
  * persisted in deterministic document order ({@code changeOrder} is the
- * zero-based diff index). {@code FIRST_VERSION} and {@code UNCHANGED} never
- * invoke the diff engine and persist no rows, and no artificial
- * "unchanged" change is ever stored.
+ * zero-based diff index). Then, for each persisted change, deterministic
+ * concept matching scans its old/new texts and persists at most one row per
+ * (change, concept) in concept-code order. {@code FIRST_VERSION} and
+ * {@code UNCHANGED} never invoke the diff engine or concept matcher and
+ * persist no rows, and no artificial "unchanged" change is ever stored.
  *
  * <p><b>Empty diff.</b> A {@code NEW_VERSION} outcome means the content hash
  * differed, so the diff is expected to be non-empty. If the engine somehow
@@ -68,6 +78,13 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
  * result that falsely implies the complete transition was persisted.
  * Retrying the observation with the same content then re-attempts the whole
  * transition (no partial version row remains to skew the retry).
+ *
+ * <p><b>Phase 2N — concept matching.</b> For {@code NEW_VERSION} only, each
+ * persisted change is matched deterministically against the privacy-concept
+ * vocabulary. Matches carry traceable evidence (verbatim substring of
+ * oldText/newText, pattern id, match kind) and are persisted in the same
+ * transaction as version and changes, ordered by concept code. The matcher
+ * is a pure Java component with no DB/I/O/clock/randomness.
  *
  * <p><b>Phase 2M — SimHash similarity.</b> For {@code NEW_VERSION} only, a
  * numerical similarity signal is produced from the persisted/new normalized
@@ -97,6 +114,9 @@ public class PolicyObservationPersistenceService {
 	private final PolicyDiffEngine diffEngine;
 	private final PolicyChangeRecordRepository changeRepository;
 	private final PolicySimHash simHash;
+	private final PrivacyConceptRepository conceptRepository;
+	private final ChangeConceptMatchRepository matchRepository;
+	private final ConceptMatcher conceptMatcher;
 	private final TransactionTemplate transactionTemplate;
 
 	public PolicyObservationPersistenceService(
@@ -105,6 +125,22 @@ public class PolicyObservationPersistenceService {
 			PolicyDiffEngine diffEngine,
 			PolicyChangeRecordRepository changeRepository,
 			PolicySimHash simHash,
+			PlatformTransactionManager transactionManager) {
+		this(versionService, versionRepository, diffEngine, changeRepository, simHash, null, null,
+				new com.soubhagya.policyimpactengine.intelligence.DeterministicConceptMatcher(),
+				transactionManager);
+	}
+
+	@Autowired
+	public PolicyObservationPersistenceService(
+			PolicyVersionService versionService,
+			PolicyVersionRepository versionRepository,
+			PolicyDiffEngine diffEngine,
+			PolicyChangeRecordRepository changeRepository,
+			PolicySimHash simHash,
+			PrivacyConceptRepository conceptRepository,
+			ChangeConceptMatchRepository matchRepository,
+			ConceptMatcher conceptMatcher,
 			PlatformTransactionManager transactionManager) {
 		if (versionService == null) {
 			throw new IllegalArgumentException("PolicyVersionService must not be null");
@@ -129,6 +165,11 @@ public class PolicyObservationPersistenceService {
 		this.diffEngine = diffEngine;
 		this.changeRepository = changeRepository;
 		this.simHash = simHash;
+		this.conceptRepository = conceptRepository;
+		this.matchRepository = matchRepository;
+		this.conceptMatcher = conceptMatcher != null
+				? conceptMatcher
+				: new com.soubhagya.policyimpactengine.intelligence.DeterministicConceptMatcher();
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
@@ -180,11 +221,12 @@ public class PolicyObservationPersistenceService {
 			PolicyDiffResult diff = diffEngine.diff(
 					previous.getNormalizedContent(), created.getNormalizedContent());
 
+			List<PolicyChangeRecord> records = List.of();
 			if (!diff.changes().isEmpty()) {
-				List<PolicyChangeRecord> records = new ArrayList<>(diff.changes().size());
+				List<PolicyChangeRecord> mutable = new ArrayList<>(diff.changes().size());
 				int order = 0;
 				for (PolicyChange change : diff.changes()) {
-					records.add(new PolicyChangeRecord(
+					mutable.add(new PolicyChangeRecord(
 							previous,
 							created,
 							change.type(),
@@ -192,8 +234,41 @@ public class PolicyObservationPersistenceService {
 							change.newText(),
 							order++));
 				}
-				changeRepository.saveAll(records);
+				records = changeRepository.saveAll(mutable);
 				changeRepository.flush();
+			}
+
+			// Concept matching inside the same transaction: version+changes+matches atomically.
+			if (!records.isEmpty() && conceptRepository != null && matchRepository != null) {
+				List<PrivacyConcept> concepts = conceptRepository.findAll();
+				// Map code -> entity for FK resolution; concepts are already ordered by matcher but
+				// we need the entity. Sort not required for map but matcher output is deterministic.
+				java.util.Map<String, PrivacyConcept> codeToConcept = new java.util.LinkedHashMap<>();
+				concepts.stream()
+						.sorted(java.util.Comparator.comparing(PrivacyConcept::getCode))
+						.forEach(c -> codeToConcept.put(c.getCode(), c));
+
+				List<ChangeConceptMatch> matches = new ArrayList<>();
+				for (PolicyChangeRecord record : records) {
+					List<ConceptMatch> conceptMatches = conceptMatcher.match(record);
+					for (ConceptMatch cm : conceptMatches) {
+						PrivacyConcept concept = codeToConcept.get(cm.conceptCode());
+						if (concept == null) {
+							throw new IllegalStateException(
+									"Concept code not found in vocabulary: " + cm.conceptCode());
+						}
+						matches.add(new ChangeConceptMatch(
+								record, concept, cm.matchedFragment(), cm.patternId(), cm.matchKind()));
+					}
+				}
+				if (!matches.isEmpty()) {
+					// Deterministic persistence order: by changeOrder then concept code.
+					matches.sort(java.util.Comparator
+							.comparing((ChangeConceptMatch m) -> m.getChange().getChangeOrder())
+							.thenComparing(m -> m.getConcept().getCode()));
+					matchRepository.saveAll(matches);
+					matchRepository.flush();
+				}
 			}
 
 			previousNormalizedRef.set(previous.getNormalizedContent());
