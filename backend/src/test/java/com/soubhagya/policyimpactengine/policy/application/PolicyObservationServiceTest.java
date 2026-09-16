@@ -72,7 +72,8 @@ class PolicyObservationServiceTest {
 		stubPipeline(policy, "<html><body><p>We collect email.</p></body></html>",
 				"We collect email.", "We collect email.", "hash-1");
 		PolicyObservationResult stored = new PolicyObservationResult(
-				policy.getId(), PolicyVersionObservationOutcome.FIRST_VERSION, 1, "hash-1", Optional.empty());
+				policy.getId(), PolicyVersionObservationOutcome.FIRST_VERSION, 1, "hash-1", Optional.empty(),
+				Optional.empty());
 		when(persistenceService.store(eq(policy.getId()), eq("We collect email."), eq("hash-1")))
 				.thenReturn(stored);
 
@@ -89,7 +90,8 @@ class PolicyObservationServiceTest {
 		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
 		stubPipeline(policy, "<html>same</html>", "same text", "same text", "hash-same");
 		PolicyObservationResult stored = new PolicyObservationResult(
-				policy.getId(), PolicyVersionObservationOutcome.UNCHANGED, 1, "hash-same", Optional.empty());
+				policy.getId(), PolicyVersionObservationOutcome.UNCHANGED, 1, "hash-same", Optional.empty(),
+				Optional.empty());
 		when(persistenceService.store(eq(policy.getId()), eq("same text"), eq("hash-same")))
 				.thenReturn(stored);
 
@@ -107,7 +109,7 @@ class PolicyObservationServiceTest {
 		PolicyDiffResult diff = new PolicyDiffResult(java.util.List.of());
 		PolicyObservationResult stored = new PolicyObservationResult(
 				policy.getId(), PolicyVersionObservationOutcome.NEW_VERSION, 2, "hash-changed",
-				Optional.of(diff));
+				Optional.of(diff), Optional.empty());
 		when(persistenceService.store(eq(policy.getId()), eq("changed text"), eq("hash-changed")))
 				.thenReturn(stored);
 
@@ -205,7 +207,7 @@ class PolicyObservationServiceTest {
 		when(persistenceService.store(eq(policy.getId()), eq("normalized text"), eq("hash-exact")))
 				.thenReturn(new PolicyObservationResult(
 						policy.getId(), PolicyVersionObservationOutcome.FIRST_VERSION, 1, "hash-exact",
-						Optional.empty()));
+						Optional.empty(), Optional.empty()));
 
 		service.observe(policy.getId());
 
@@ -229,7 +231,7 @@ class PolicyObservationServiceTest {
 		when(persistenceService.store(policy.getId(), "normalized", "hash-ordered"))
 				.thenReturn(new PolicyObservationResult(
 						policy.getId(), PolicyVersionObservationOutcome.FIRST_VERSION, 1, "hash-ordered",
-						Optional.empty()));
+						Optional.empty(), Optional.empty()));
 
 		service.observe(policy.getId());
 

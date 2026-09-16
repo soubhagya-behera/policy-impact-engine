@@ -29,6 +29,8 @@ import com.soubhagya.policyimpactengine.diff.PolicyChange;
 import com.soubhagya.policyimpactengine.diff.PolicyChangeType;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
+import com.soubhagya.policyimpactengine.diff.PolicySimHash;
+import com.soubhagya.policyimpactengine.diff.SimHashDistance;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecord;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
@@ -36,12 +38,12 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
 
 /**
- * Phase 2K — deterministic unit tests for version-plus-change persistence.
+ * Phase 2K/2M — deterministic unit tests for version-plus-change persistence
+ * and SimHash similarity signal.
  *
  * <p>No Spring context, no database, no network. The version service,
- * version repository, diff engine, and change repository are Mockito mocks
- * with controlled answers; the diff algorithm itself is covered by its own
- * 2I tests and the repository behavior by Testcontainers tests.
+ * version repository, diff engine, SimHash, and change repository are
+ * Mockito mocks with controlled answers.
  */
 @ExtendWith(MockitoExtension.class)
 class PolicyObservationServiceDiffTest {
@@ -59,6 +61,9 @@ class PolicyObservationServiceDiffTest {
 	private PolicyChangeRecordRepository changeRepository;
 
 	@Mock
+	private PolicySimHash simHash;
+
+	@Mock
 	private PlatformTransactionManager transactionManager;
 
 	@Mock
@@ -73,7 +78,7 @@ class PolicyObservationServiceDiffTest {
 	}
 
 	@Test
-	void firstVersionCarriesNoDiffAndPersistsNoChanges() {
+	void firstVersionCarriesNoDiffAndNoSimilarityAndPersistsNoChanges() {
 		UUID policyId = UUID.randomUUID();
 		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
 		when(versionService.observe(eq(policyId), eq("first normalized"), eq("hash-first")))
@@ -85,10 +90,11 @@ class PolicyObservationServiceDiffTest {
 		assertThat(result.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);
 		assertThat(result.versionNumber()).isEqualTo(1);
 		assertThat(result.diff()).isEmpty();
+		assertThat(result.similarity()).isEmpty();
 	}
 
 	@Test
-	void firstVersionNeverLooksUpPreviousVersionOrDiffsOrPersists() {
+	void firstVersionNeverLooksUpPreviousVersionOrDiffsOrSimHashesOrPersists() {
 		UUID policyId = UUID.randomUUID();
 		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
 		when(versionService.observe(eq(policyId), eq("first normalized"), eq("hash-first")))
@@ -97,11 +103,11 @@ class PolicyObservationServiceDiffTest {
 
 		service.store(policyId, "first normalized", "hash-first");
 
-		verifyNoInteractions(versionRepository, diffEngine, changeRepository);
+		verifyNoInteractions(versionRepository, diffEngine, changeRepository, simHash);
 	}
 
 	@Test
-	void unchangedCarriesNoDiffAndPersistsNoChanges() {
+	void unchangedCarriesNoDiffAndNoSimilarityAndPersistsNoChanges() {
 		UUID policyId = UUID.randomUUID();
 		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
 		when(versionService.observe(eq(policyId), eq("same normalized"), eq("hash-same")))
@@ -113,10 +119,11 @@ class PolicyObservationServiceDiffTest {
 		assertThat(result.outcome()).isEqualTo(PolicyVersionObservationOutcome.UNCHANGED);
 		assertThat(result.versionNumber()).isEqualTo(1);
 		assertThat(result.diff()).isEmpty();
+		assertThat(result.similarity()).isEmpty();
 	}
 
 	@Test
-	void unchangedNeverInvokesDiffEngineOrChangeRepository() {
+	void unchangedNeverInvokesDiffEngineOrSimHashOrChangeRepository() {
 		UUID policyId = UUID.randomUUID();
 		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
 		when(versionService.observe(eq(policyId), eq("same normalized"), eq("hash-same")))
@@ -125,11 +132,11 @@ class PolicyObservationServiceDiffTest {
 
 		service.store(policyId, "same normalized", "hash-same");
 
-		verifyNoInteractions(versionRepository, diffEngine, changeRepository);
+		verifyNoInteractions(versionRepository, diffEngine, changeRepository, simHash);
 	}
 
 	@Test
-	void newVersionDiffsPreviousAgainstNewInOrderAndPersistsChangesInOrder() {
+	void newVersionDiffsPreviousAgainstNewInOrderAndPersistsChangesInOrderAndComputesSimilarity() {
 		UUID policyId = UUID.randomUUID();
 		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
 		when(versionService.observe(eq(policyId), eq("new normalized"), eq("hash-new")))
@@ -141,6 +148,8 @@ class PolicyObservationServiceDiffTest {
 		PolicyDiffResult diff = new PolicyDiffResult(List.of(
 				new PolicyChange(PolicyChangeType.MODIFIED, "previous normalized", "new normalized")));
 		when(diffEngine.diff("previous normalized", "new normalized")).thenReturn(diff);
+		when(simHash.fingerprint("previous normalized")).thenReturn(0xAAAAAAAAL);
+		when(simHash.fingerprint("new normalized")).thenReturn(0x55555555L);
 
 		PolicyObservationResult result = service.store(policyId, "new normalized", "hash-new");
 
@@ -148,6 +157,13 @@ class PolicyObservationServiceDiffTest {
 		assertThat(result.versionNumber()).isEqualTo(2);
 		assertThat(result.contentHash()).isEqualTo("hash-new");
 		assertThat(result.diff()).contains(diff);
+		assertThat(result.similarity()).isPresent();
+		assertThat(result.similarity().orElseThrow().previousHash()).isEqualTo(0xAAAAAAAAL);
+		assertThat(result.similarity().orElseThrow().newHash()).isEqualTo(0x55555555L);
+		int expectedDistance = SimHashDistance.hammingDistance(0xAAAAAAAAL, 0x55555555L);
+		assertThat(result.similarity().orElseThrow().hammingDistance()).isEqualTo(expectedDistance);
+		assertThat(result.similarity().orElseThrow().similarity())
+				.isEqualTo(SimHashDistance.similarity(0xAAAAAAAAL, 0x55555555L));
 
 		InOrder order = inOrder(versionService, versionRepository, diffEngine, changeRepository);
 		order.verify(versionService).observe(policyId, "new normalized", "hash-new");
@@ -179,6 +195,8 @@ class PolicyObservationServiceDiffTest {
 						new PolicyVersion(policy, 1, "previous normalized", "hash-previous")));
 		PolicyDiffResult diff = new PolicyDiffResult(List.of());
 		when(diffEngine.diff(eq("previous normalized"), eq("normalized text"))).thenReturn(diff);
+		when(simHash.fingerprint("previous normalized")).thenReturn(1L);
+		when(simHash.fingerprint("normalized text")).thenReturn(2L);
 
 		service.store(policyId, "normalized text", "hash-new");
 
@@ -192,7 +210,7 @@ class PolicyObservationServiceDiffTest {
 	}
 
 	@Test
-	void emptyDiffPersistsNoRowsButStillCarriesEmptyDiff() {
+	void emptyDiffPersistsNoRowsButStillCarriesEmptyDiffAndSimilarity() {
 		UUID policyId = UUID.randomUUID();
 		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
 		when(versionService.observe(eq(policyId), eq("new normalized"), eq("hash-new")))
@@ -203,12 +221,18 @@ class PolicyObservationServiceDiffTest {
 						new PolicyVersion(policy, 1, "previous normalized", "hash-previous")));
 		PolicyDiffResult emptyDiff = new PolicyDiffResult(List.of());
 		when(diffEngine.diff("previous normalized", "new normalized")).thenReturn(emptyDiff);
+		when(simHash.fingerprint("previous normalized")).thenReturn(10L);
+		when(simHash.fingerprint("new normalized")).thenReturn(20L);
 
 		PolicyObservationResult result = service.store(policyId, "new normalized", "hash-new");
 
 		assertThat(result.outcome()).isEqualTo(PolicyVersionObservationOutcome.NEW_VERSION);
 		assertThat(result.diff()).contains(emptyDiff);
+		assertThat(result.similarity()).isPresent();
+		// No change rows persisted, but SimHash is computed
 		verifyNoInteractions(changeRepository);
+		verify(simHash).fingerprint("previous normalized");
+		verify(simHash).fingerprint("new normalized");
 	}
 
 	@Test
@@ -232,10 +256,11 @@ class PolicyObservationServiceDiffTest {
 				.hasMessageContaining("change persistence failed");
 
 		verify(versionService).observe(policyId, "new normalized", "hash-new");
+		verifyNoInteractions(simHash);
 	}
 
 	@Test
-	void diffFailurePropagatesWithoutFakeDiff() {
+	void diffFailurePropagatesWithoutFakeDiffOrSimilarity() {
 		UUID policyId = UUID.randomUUID();
 		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
 		when(versionService.observe(eq(policyId), eq("new normalized"), eq("hash-new")))
@@ -252,7 +277,7 @@ class PolicyObservationServiceDiffTest {
 				.hasMessageContaining("diff failed");
 
 		verify(versionService).observe(policyId, "new normalized", "hash-new");
-		verifyNoInteractions(changeRepository);
+		verifyNoInteractions(changeRepository, simHash);
 	}
 
 	@Test
@@ -269,7 +294,7 @@ class PolicyObservationServiceDiffTest {
 				.isInstanceOf(IllegalStateException.class)
 				.hasMessageContaining("not found for diffing");
 
-		verifyNoInteractions(diffEngine, changeRepository);
+		verifyNoInteractions(diffEngine, changeRepository, simHash);
 	}
 
 	private Policy registeredPolicy(String name, String url) {

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -12,14 +13,18 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.soubhagya.policyimpactengine.diff.PolicyChange;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
+import com.soubhagya.policyimpactengine.diff.PolicySimHash;
+import com.soubhagya.policyimpactengine.diff.SimHashDistance;
+import com.soubhagya.policyimpactengine.diff.SimHashSimilarity;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecord;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
 
 /**
- * Phase 2K — owns the single persistence transaction for a policy
- * observation: version creation plus change-record persistence.
+ * Phase 2K/2M — owns the single persistence transaction for a policy
+ * observation: version creation plus change-record persistence, plus the
+ * SimHash similarity signal for {@code NEW_VERSION}.
  *
  * <p><b>Transaction boundary.</b> {@link #store} is the only persistence
  * entry point of the observation path. The caller
@@ -63,6 +68,26 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
  * result that falsely implies the complete transition was persisted.
  * Retrying the observation with the same content then re-attempts the whole
  * transition (no partial version row remains to skew the retry).
+ *
+ * <p><b>Phase 2M — SimHash similarity.</b> For {@code NEW_VERSION} only, a
+ * numerical similarity signal is produced from the persisted/new normalized
+ * canonical contents via {@link PolicySimHash} and {@link SimHashDistance}.
+ * SHA-256 remains authoritative for unchanged detection: same SHA-256 → no
+ * version, no diff, no SimHash; different SHA-256 → new version, diff, and
+ * similarity. SimHash is an additional signal only; it never changes whether
+ * a version is created and never converts a changed hash into
+ * {@code UNCHANGED}. The pure, inexpensive SimHash calculation runs
+ * <i>outside</i> the version-plus-changes transaction, after it commits, so a
+ * SimHash failure propagates explicitly with no fake similarity and without
+ * rolling back the already-committed version and change rows (retry then
+ * re-attempts SimHash on the same persisted transition). {@code FIRST_VERSION}
+ * and {@code UNCHANGED} never invoke SimHash and carry no similarity. For
+ * {@code NEW_VERSION} the canonical normalized contents of the persisted
+ * predecessor (N-1) and the new version (N) are fingerprinted, the Hamming
+ * distance and the linear similarity {@code 1 - distance/64} are derived via
+ * the existing {@link SimHashDistance} API, and no threshold or
+ * classification is applied. SimHash never receives raw HTML, only the
+ * normalized canonical texts.
  */
 @Service
 public class PolicyObservationPersistenceService {
@@ -71,6 +96,7 @@ public class PolicyObservationPersistenceService {
 	private final PolicyVersionRepository versionRepository;
 	private final PolicyDiffEngine diffEngine;
 	private final PolicyChangeRecordRepository changeRepository;
+	private final PolicySimHash simHash;
 	private final TransactionTemplate transactionTemplate;
 
 	public PolicyObservationPersistenceService(
@@ -78,6 +104,7 @@ public class PolicyObservationPersistenceService {
 			PolicyVersionRepository versionRepository,
 			PolicyDiffEngine diffEngine,
 			PolicyChangeRecordRepository changeRepository,
+			PolicySimHash simHash,
 			PlatformTransactionManager transactionManager) {
 		if (versionService == null) {
 			throw new IllegalArgumentException("PolicyVersionService must not be null");
@@ -91,6 +118,9 @@ public class PolicyObservationPersistenceService {
 		if (changeRepository == null) {
 			throw new IllegalArgumentException("PolicyChangeRecordRepository must not be null");
 		}
+		if (simHash == null) {
+			throw new IllegalArgumentException("PolicySimHash must not be null");
+		}
 		if (transactionManager == null) {
 			throw new IllegalArgumentException("PlatformTransactionManager must not be null");
 		}
@@ -98,6 +128,7 @@ public class PolicyObservationPersistenceService {
 		this.versionRepository = versionRepository;
 		this.diffEngine = diffEngine;
 		this.changeRepository = changeRepository;
+		this.simHash = simHash;
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
@@ -108,6 +139,7 @@ public class PolicyObservationPersistenceService {
 	 * @param normalizedContent canonical normalized content; must not be null
 	 * @param contentHash SHA-256 hash of the normalized content; must not be blank
 	 * @return scalar observation result with a diff only for
+	 *         {@code NEW_VERSION} and a SimHash similarity only for
 	 *         {@code NEW_VERSION}; never exposes JPA entities
 	 */
 	public PolicyObservationResult store(UUID policyId, String normalizedContent, String contentHash) {
@@ -121,7 +153,10 @@ public class PolicyObservationPersistenceService {
 			throw new IllegalArgumentException("Content hash must not be blank");
 		}
 
-		return transactionTemplate.execute(status -> {
+		AtomicReference<String> previousNormalizedRef = new AtomicReference<>();
+		AtomicReference<String> newNormalizedRef = new AtomicReference<>();
+
+		PolicyObservationResult intermediate = transactionTemplate.execute(status -> {
 			PolicyVersionObservation observation = versionService.observe(policyId, normalizedContent,
 					contentHash);
 
@@ -131,6 +166,7 @@ public class PolicyObservationPersistenceService {
 						observation.outcome(),
 						observation.version().getVersionNumber(),
 						observation.version().getContentHash(),
+						Optional.empty(),
 						Optional.empty());
 			}
 
@@ -160,13 +196,49 @@ public class PolicyObservationPersistenceService {
 				changeRepository.flush();
 			}
 
+			previousNormalizedRef.set(previous.getNormalizedContent());
+			newNormalizedRef.set(created.getNormalizedContent());
+
 			return new PolicyObservationResult(
 					policyId,
 					observation.outcome(),
 					created.getVersionNumber(),
 					created.getContentHash(),
-					Optional.of(diff));
+					Optional.of(diff),
+					Optional.empty());
 		});
+
+		if (intermediate == null) {
+			throw new IllegalStateException("Transaction returned null observation result");
+		}
+		if (intermediate.outcome() != PolicyVersionObservationOutcome.NEW_VERSION) {
+			return intermediate;
+		}
+
+		// NEW_VERSION: compute SimHash similarity outside the persistence
+		// transaction so a SimHash failure does not roll back the already
+		// committed version plus change rows, and so the short transaction
+		// is not extended by this pure inexpensive calculation. The result
+		// propagates explicitly — no fake similarity is returned.
+		String previousNormalized = previousNormalizedRef.get();
+		String newNormalized = newNormalizedRef.get();
+		if (previousNormalized == null || newNormalized == null) {
+			throw new IllegalStateException("Missing normalized content for SimHash similarity");
+		}
+		long previousHash = simHash.fingerprint(previousNormalized);
+		long newHash = simHash.fingerprint(newNormalized);
+		int hammingDistance = SimHashDistance.hammingDistance(previousHash, newHash);
+		double similarity = SimHashDistance.similarity(previousHash, newHash);
+		SimHashSimilarity simHashSimilarity = new SimHashSimilarity(
+				previousHash, newHash, hammingDistance, similarity);
+
+		return new PolicyObservationResult(
+				intermediate.policyId(),
+				intermediate.outcome(),
+				intermediate.versionNumber(),
+				intermediate.contentHash(),
+				intermediate.diff(),
+				Optional.of(simHashSimilarity));
 	}
 
 }

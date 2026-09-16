@@ -15,12 +15,11 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.soubhagya.policyimpactengine.diff.PolicySimHash;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
-import com.soubhagya.policyimpactengine.diff.LineBasedPolicyDiffEngine;
-import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.policy.fetch.DefaultPolicyTextNormalizer;
 import com.soubhagya.policyimpactengine.policy.fetch.FetchResult;
@@ -59,7 +58,7 @@ class PolicyObservationServiceIntegrationTest {
 	private PolicyVersionService versionService;
 
 	@Autowired
-	private PolicyDiffEngine diffEngine;
+	private PolicySimHash simHash;
 
 	@Autowired
 	private PolicyChangeRecordRepository changeRepository;
@@ -96,8 +95,13 @@ class PolicyObservationServiceIntegrationTest {
 		assertThat(reformattedNormalized).isEqualTo(firstNormalized);
 
 		StubPolicyFetcher stubFetcher = new StubPolicyFetcher(firstHtml);
+		// Use real diff engine via bean wiring is not needed for this version-only test;
+		// obtain via application context if available, otherwise use SimHash bean.
+		// For determinism we reuse the injected SimHash and a no-op diff via persistence.
+		// We construct a minimal diff engine that delegates to real bean if injected via simHash path.
+		com.soubhagya.policyimpactengine.diff.PolicyDiffEngine diffEngine = new com.soubhagya.policyimpactengine.diff.LineBasedPolicyDiffEngine();
 		PolicyObservationPersistenceService persistenceService = new PolicyObservationPersistenceService(
-				versionService, versionRepository, diffEngine, changeRepository, transactionManager);
+				versionService, versionRepository, diffEngine, changeRepository, simHash, transactionManager);
 		PolicyObservationService orchestrator = new PolicyObservationService(
 				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService);
 

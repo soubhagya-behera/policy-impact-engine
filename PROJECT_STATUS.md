@@ -143,10 +143,13 @@ Completed (Phase 2L — SimHash / Near-Duplicate Detection):
 - Tokenization documented on the implementation: Unicode letter/digit runs ([^\p{L}\p{N}]+ separators), weight 1 per occurrence, case preserved, no stemming/stop-words/semantics; FNV-1a 64-bit token hashes; accumulator ties resolve to 0; null/empty/separator-only input yields 0L
 - DefaultPolicySimHashTest (empty/same/repeated/multi-instance/small + privacy fixtures, symmetry, Unicode, punctuation/case behavior, post-normalization equivalence, no-distance-assumption for different content, no-self-normalization, SHA-256-vs-SimHash distinction test) + SimHashDistanceTest (0/1/multi-bit distances, symmetry, similarity formula) — deterministic inline-string unit tests only
 
-Not yet implemented:
-- Redirect revalidation (redirects remain disabled)
-- SimHash integration/calibration (utility exists standalone; no pipeline use, no threshold)
-- Classification / concepts / impact / recommendations / scheduler / notifications
+Completed (Phase 2M — SimHash Integration as Similarity Signal ONLY):
+- SimHashSimilarity immutable value object (previousHash/newHash/hammingDistance/similarity via SimHashDistance, linear 1-distance/64, no threshold/classification, pure JDK, no Spring/DB)
+- PolicyObservationResult extended with Optional&lt;SimHashSimilarity&gt; similarity: absent for FIRST_VERSION (no previous version) and UNCHANGED (SimHash not run), present for NEW_VERSION only; never exposes JPA entities, never persisted, no migration/column/table/threshold
+- PolicyDiffConfiguration exposes DefaultPolicySimHash as Spring bean (PolicySimHash stays pure Spring-free)
+- PolicyObservationPersistenceService integrates SimHash as application-level orchestration: persist version+N-1→N diff→changes in one short transaction (no HTTP), then obtain persisted normalized canonical contents (N-1 and N), fingerprint both via PolicySimHash, Hamming distance + linear similarity via SimHashDistance API; no new formula, no threshold, no classification; SimHash receives normalized content never raw HTML; previous/new pairing verified; version+changes commit/rollback together, SimHash runs outside the transaction so a SimHash failure propagates explicitly with no fake similarity and without rolling back the committed transition; SHA-256 remains authoritative (same hash → UNCHANGED no version/diff/similarity, different hash → NEW_VERSION with diff+similarity)
+- PolicySimHash and SimHashDistance remain pure Spring-free; SHA-256, PolicyTextNormalizer, PolicyDiffEngine untouched; no repository access in SimHash, no versioning logic in SimHash
+- PolicyObservationSimHashTest (9 deterministic Mockito unit tests: FIRST_VERSION no-similarity/no-invocation, UNCHANGED no-similarity/no-invocation, NEW_VERSION normalized pairing, raw-HTML never sent, correct Hamming/similarity vs SimHashDistance, SHA-256 authority, SimHash failure propagation, deterministic repeat) + PolicySimHashIntegrationTest (Testcontainers PostgreSQL end-to-end with real pipeline and counting delegates: v1 FIRST_VERSION no similarity, reformatted UNCHANGED no similarity, wording NEW_VERSION diff+s similarity, SHA/version/change data unaffected, deterministic values)
 
 ## Next Phase
 
@@ -236,7 +239,12 @@ Phase 2L — SimHash / Near-Duplicate Detection is DONE:
 - SHA-256 untouched as exact identity; SimHash unpersisted, unwired, no thresholds — DONE
 - Deterministic inline-string unit tests incl. SHA-256-vs-SimHash distinction test — DONE
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation, SimHash integration/calibration if applicable, and later pipeline stages).
+Phase 2M — SimHash Integration as Similarity Signal ONLY is DONE:
+- SimHashSimilarity value object + PolicyObservationResult similarity field (absent for FIRST/UNCHANGED, present for NEW_VERSION, never persisted) — DONE
+- Application orchestration coordinates existing SimHash + SimHashDistance over persisted normalized contents outside the version+changes transaction — DONE
+- Deterministic unit tests (9 cases) + Testcontainers PostgreSQL integration test (v1 FIRST no similarity → reformatted UNCHANGED no similarity → wording NEW_VERSION diff+similarity, SHA/version/change unaffected, deterministic) — DONE
+
+Remaining Phase 2 scope will be built in later slices (redirect revalidation and later pipeline stages).
 
 ## Current Status
 
@@ -351,9 +359,10 @@ Phase 2I — COMPLETE
 Phase 2J — COMPLETE
 Phase 2K — COMPLETE
 Phase 2L — COMPLETE
+Phase 2M — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
-- SimHash integration/calibration if applicable
+- similarity calibration/near-duplicate policy if actually required
 - privacy concept matching
 - impact analysis
 - personalized assessment

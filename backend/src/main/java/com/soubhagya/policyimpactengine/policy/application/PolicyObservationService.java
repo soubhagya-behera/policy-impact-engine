@@ -24,14 +24,20 @@ import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
  * </pre>
  *
  * <p>No URL validation, SSRF logic, response-size handling, HTML parsing,
- * normalization, hashing, version comparison, diff computation, or change
- * persistence lives here; each stage is owned by its injected abstraction.
- * Diff-to-version integration and change-record persistence are owned by
+ * normalization, hashing, version comparison, diff computation, change
+ * persistence, or SimHash similarity lives here; each stage is owned by its
+ * injected abstraction. Diff-to-version integration, change-record
+ * persistence, and SimHash similarity for {@code NEW_VERSION} are owned by
  * {@link PolicyObservationPersistenceService}: for {@code NEW_VERSION} the
  * normalized content of the previous version (number N&nbsp;-&nbsp;1) is
- * diffed against the new version (number N) and the resulting changes are
- * persisted in deterministic document order. {@code FIRST_VERSION} and
- * {@code UNCHANGED} persist no change rows and carry no diff.
+ * diffed against the new version (number N), the resulting changes are
+ * persisted in deterministic document order, and a numerical SimHash
+ * similarity (previous/new fingerprints, Hamming distance, linear similarity
+ * via {@link com.soubhagya.policyimpactengine.diff.SimHashDistance}) is
+ * produced as an additional signal only. {@code FIRST_VERSION} and
+ * {@code UNCHANGED} persist no change rows and carry no diff or similarity;
+ * SHA-256 remains authoritative for unchanged detection and SimHash never
+ * changes whether a version is created.
  *
  * <p><b>Transaction boundary:</b> this method is deliberately NOT
  * {@code @Transactional}. The policy lookup runs in the repository's own
@@ -39,20 +45,22 @@ import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
  * database transaction held open, and
  * {@link PolicyObservationPersistenceService#store} owns the single short
  * persistence transaction (version creation plus change persistence, with
- * the pure in-memory diff inside it and no network I/O). A single
- * transaction spanning lookup → network → parse → hash → persist would hold
- * a database connection across an unbounded external call.
+ * the pure in-memory diff inside it and no network I/O, followed by the
+ * pure SimHash similarity outside the transaction). A single transaction
+ * spanning lookup → network → parse → hash → persist would hold a database
+ * connection across an unbounded external call.
  *
  * <p><b>Failure rules:</b> persistence failures propagate unchanged through
  * the persistence service — the transaction rolls back version and changes
  * together, so no successful result is returned that would falsely imply
- * the complete transition was persisted. Other failures propagate unchanged
- * as before: missing policy surfaces {@link NoSuchElementException} (the
- * existing service/repository not-found convention), fetch failures
- * propagate the existing fetch exception, and
- * extraction/normalization/hashing failures propagate to the caller. No
- * generic exception hierarchy is introduced and no fake outcome is returned
- * for exceptions.
+ * the complete transition was persisted. SimHash failures propagate
+ * explicitly with no fake similarity (version and changes already committed
+ * remain persisted). Other failures propagate unchanged as before: missing
+ * policy surfaces {@link NoSuchElementException} (the existing
+ * service/repository not-found convention), fetch failures propagate the
+ * existing fetch exception, and extraction/normalization/hashing failures
+ * propagate to the caller. No generic exception hierarchy is introduced and
+ * no fake outcome is returned for exceptions.
  */
 @Service
 public class PolicyObservationService {
@@ -101,7 +109,7 @@ public class PolicyObservationService {
 	 * Observes the current live content of the given policy.
 	 *
 	 * @param policyId identifier of an already-registered policy
-	 * @return scalar observation result with a diff only for
+	 * @return scalar observation result with a diff and similarity only for
 	 *         {@code NEW_VERSION}; never exposes JPA entities
 	 */
 	public PolicyObservationResult observe(UUID policyId) {

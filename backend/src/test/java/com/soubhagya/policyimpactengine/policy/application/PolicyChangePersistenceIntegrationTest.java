@@ -18,10 +18,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.soubhagya.policyimpactengine.diff.DefaultPolicySimHash;
 import com.soubhagya.policyimpactengine.diff.LineBasedPolicyDiffEngine;
 import com.soubhagya.policyimpactengine.diff.PolicyChange;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
+import com.soubhagya.policyimpactengine.diff.PolicySimHash;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecord;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
@@ -66,6 +68,9 @@ class PolicyChangePersistenceIntegrationTest {
 
 	@Autowired
 	private PolicyDiffEngine diffEngine;
+
+	@Autowired
+	private PolicySimHash simHash;
 
 	@Autowired
 	private PlatformTransactionManager transactionManager;
@@ -308,7 +313,7 @@ class PolicyChangePersistenceIntegrationTest {
 
 	private PolicyObservationPersistenceService persistenceService(PolicyDiffEngine engine) {
 		return new PolicyObservationPersistenceService(versionService, versionRepository, engine,
-				changeRepository, transactionManager);
+				changeRepository, simHash != null ? simHash : new DefaultPolicySimHash(), transactionManager);
 	}
 
 	private PolicyObservationService observationService(PolicyFetcher fetcher, PolicyDiffEngine engine) {
