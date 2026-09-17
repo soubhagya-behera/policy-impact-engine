@@ -13,4 +13,9 @@ public class ImpactConfiguration {
 	public ImpactScoringEngine impactScoringEngine() {
 		return new DeterministicImpactScoringEngine();
 	}
+
+	@Bean
+	public PersonalizedImpactScoringEngine personalizedImpactScoringEngine() {
+		return new DeterministicPersonalizedImpactScoringEngine();
+	}
 }

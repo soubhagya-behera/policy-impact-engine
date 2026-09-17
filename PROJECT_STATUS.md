@@ -405,7 +405,25 @@ resolution and no REST endpoints, ChangeImpact untouched and
 user-independent, Testcontainers repository + integration tests —
 356 tests passing).
 
-Phase 2P = COMPLETE. Phase 2 overall = IN PROGRESS.
+Phase 2Q slice implemented and tested successfully
+(Flyway V7 impact_assessment + impact_assessment_breakdown with
+UNIQUE(user_id, new_version_id), UNIQUE(assessment_id, change_impact_id)
+and CHECK(previous_version_id <> new_version_id), immutable
+ImpactAssessment + ImpactAssessmentBreakdown snapshots of system
+normalized/band plus effective sensitivity and personalized
+normalized/band with PERSONALIZATION_RULES_VERSION=1, pure
+PersonalizedImpactScoringEngine +
+DeterministicPersonalizedImpactScoringEngine with
+personalized = min(100, round(base × effective / 3.0, 2) × 10) and MAX
+aggregate, sensitivity resolved only via EffectiveSensitivityResolver
+(explicit 0 distinguishes from a missing preference), idempotent
+getOrCreateAssessment per (user, new version) via a short
+TransactionTemplate write with UNIQUE-backed
+DataIntegrityViolationException re-read, readOnly list/query APIs,
+no REST/auth/DTOs, diff/matching/ChangeImpact untouched,
+Testcontainers repository + integration tests — 380 tests passing).
+
+Phase 2Q = COMPLETE. Phase 2 overall = IN PROGRESS.
 
 Phase 2P notes:
 - User introduced without authentication (id + timestamps only; no
@@ -415,7 +433,8 @@ email/password/role/JWT; authentication deferred).
 preference row falls back to PrivacyConcept.default_sensitivity.
 - Explicit 0 is a valid preference and overrides the default.
 - ChangeImpact remains user-independent (system-level fact).
-- Personalized ImpactAssessment deferred to Phase 2Q.
+- Personalized ImpactAssessment deferred to Phase 2Q (implemented in
+Phase 2Q).
 - Authentication deferred; no public preference endpoints; service
 APIs take userId explicitly for future authentication.
 
@@ -437,10 +456,10 @@ Phase 2M — COMPLETE
 Phase 2N — COMPLETE
 Phase 2O — COMPLETE
 Phase 2P — COMPLETE
+Phase 2Q — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- personalized assessment (ImpactAssessment, Phase 2Q+)
 - recommendations
 - PolicyFetchAttempt
 - scheduling
@@ -453,4 +472,4 @@ Do not mark Phase 2 complete yet.
 The next implementation task is the next Phase 2 slice (later pipeline
 stages),
 as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2P without explicit instruction.
+Do not begin Phase 2R without explicit instruction.
