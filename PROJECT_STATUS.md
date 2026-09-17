@@ -392,6 +392,33 @@ same-transaction version+changes+matches+impacts atomically with
 rollback, SimHash outside TX, no user sensitivity/section criticality,
 Testcontainers repository + end-to-end tests — 333 tests passing).
 
+Phase 2P slice implemented and tested successfully
+(Flyway V6 app_user + user_privacy_preference with
+UNIQUE(user_id, concept_id) and SMALLINT sensitivity 0–5, immutable User
+identity without authentication, mutable UserPrivacyPreference with
+updateSensitivity, user-scoped repositories only, pure
+DeterministicEffectiveSensitivityResolver with explicit-preference
+override and missing-row fallback to PrivacyConcept.default_sensitivity
+including explicit 0, deterministic code ordering, short-transaction
+UserService/UserPrivacyPreferenceService with upsert/delete/effective
+resolution and no REST endpoints, ChangeImpact untouched and
+user-independent, Testcontainers repository + integration tests —
+356 tests passing).
+
+Phase 2P = COMPLETE. Phase 2 overall = IN PROGRESS.
+
+Phase 2P notes:
+- User introduced without authentication (id + timestamps only; no
+email/password/role/JWT; authentication deferred).
+- UserPrivacyPreference introduced with sensitivity range 0–5.
+- Explicit preference overrides the concept default; missing
+preference row falls back to PrivacyConcept.default_sensitivity.
+- Explicit 0 is a valid preference and overrides the default.
+- ChangeImpact remains user-independent (system-level fact).
+- Personalized ImpactAssessment deferred to Phase 2Q.
+- Authentication deferred; no public preference endpoints; service
+APIs take userId explicitly for future authentication.
+
 Phase 2 — Policy Fetching is IN PROGRESS.
 
 Phase 2A — COMPLETE
@@ -409,10 +436,11 @@ Phase 2L — COMPLETE
 Phase 2M — COMPLETE
 Phase 2N — COMPLETE
 Phase 2O — COMPLETE
+Phase 2P — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- personalized assessment (UserPrivacyPreference + ImpactAssessment)
+- personalized assessment (ImpactAssessment, Phase 2Q+)
 - recommendations
 - PolicyFetchAttempt
 - scheduling
