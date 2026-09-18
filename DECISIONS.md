@@ -131,4 +131,34 @@ Decisions listed here are approved. Proposals that have not been approved are ma
 - Documentation must be kept accurate: PROJECT_STATUS.md is updated after each phase, and architectural changes require a DECISIONS.md entry before implementation.
 - Documentation drift is a maintenance risk; the update rules in DEVELOPMENT.md are the countermeasure.
 
+---
+
+## ADR-009 — Code-Defined Recommendation Rules (Phase 2R v1)
+
+**Status:** Accepted (Phase 2R v1 — these are explicitly NEW Phase 2R v1 design decisions, not previously specified behavior)
+
+**Context:** Phase 2R introduces recommendations over the Phase 2Q personalized assessments. The older architecture text (ARCHITECTURE.md §23) described the planned engine generically ("replace pending set atomically") without binding rule semantics. Phase 2R approved a concrete four-rule v1 vocabulary and several design decisions that had no prior specification.
+
+**Decision:**
+
+1. The complete v1 recommendation vocabulary is exactly four rules: `REC-DELETION-RIGHTS-LOST`, `REC-SHARING-OPT-OUT`, `REC-REVIEW-SETTINGS`, `REC-NONE-REQUIRED`.
+2. `REC-DELETION-RIGHTS-LOST`: `DELETION_RIGHTS` + `REMOVED`/`MODIFIED` → `EXERCISE_DELETION`; `ADDED` is ignored; the rule is band-less. The current diff engine cannot determine whether a `MODIFIED` clause strengthened or weakened the deletion right, so REMOVED/MODIFIED is treated as the deterministic signal.
+3. `REC-SHARING-OPT-OUT`: `THIRD_PARTY_SHARING` or `ADVERTISING` with personalized band MEDIUM/HIGH/CRITICAL → `OPT_OUT_SHARING`. `LOCATION` is intentionally excluded from this rule (it can still receive `REVIEW_SETTINGS` via the catch-all). `ADVERTISING` is intentionally mapped to `OPT_OUT_SHARING` for this v1 recommendation vocabulary.
+4. `REC-REVIEW-SETTINGS`: any concept with personalized band MEDIUM/HIGH/CRITICAL → `REVIEW_SETTINGS`; this is the generic actionable catch-all. LOW and NONE never produce it.
+5. `REC-NONE-REQUIRED`: if no rule 1–3 fired and the assessment aggregate band is NONE or LOW, exactly one assessment-level `NONE_REQUIRED` recommendation is produced with `concept_code = NULL`. It means "no actionable recommendation was generated for this assessment", not "the policy has no changes".
+6. Because `privacy_concept` has no concept category column, explicit concept-code sets are the Phase 2R proxy for "concept category". No category column is added in Phase 2R.
+7. Concept-level rules condition on `personalizedBand` (user-specific, consistent with Phase 2Q personalization); the assessment-level `aggregateBand` is used only by the `NONE_REQUIRED` closure rule.
+8. Ranking is deterministic: personalized score (descending), then rule order (ascending), then concept code (ascending) as the final tie-break.
+9. Recommendations are append-only: no recommendation row is ever mutated or deleted. The **current/pending recommendation set** for a user is the set attached to the user's latest assessment. This is a deliberate Phase 2R interpretation of the older ARCHITECTURE.md §23 "regeneration replaces the pending set atomically" wording: the pipeline never rewrites history; a new assessment supersedes the previous pending set by becoming the latest, leaving prior recommendations intact as history.
+10. `recommendation` does NOT store `user_id`: ownership is derived through `recommendation.assessment_id` → `impact_assessment.user_id`. This follows the existing V3/V4/V7 no-duplicated-owner-FK convention (child rows never duplicate the owner's foreign key), avoids redundant ownership facts that two independent foreign keys could desynchronize, and keeps the Phase 2R model minimal. User isolation is enforced at the service boundary by resolving the user's own assessment first (`userId` + `newVersionId`); repository reads are assessment-scoped.
+
+Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and are never externalized to the database.
+
+**Consequences:**
+
+- Rule behavior is reproducible, testable, and auditable; changing rules is a code change that bumps the version, and every persisted recommendation records the version that produced it.
+- The pending-set interpretation keeps the append-only philosophy (ADR-003) intact: superseded recommendations remain queryable history rather than being deleted.
+- Concept-code sets must be maintained when the vocabulary evolves; a future category column would replace the proxy, which is a versioned rules change.
+- Ranking and deduplication are fully deterministic; the engine is a pure function of the assessment breakdowns and the aggregate band.
+- Ownership without duplication: because the assessment already binds a user to a version, storing `user_id` again on each recommendation would create a second, unenforced ownership fact; deriving it through the assessment keeps reads and writes to a single source of truth.
 

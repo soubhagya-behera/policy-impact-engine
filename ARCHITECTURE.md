@@ -328,13 +328,15 @@ Personalization is where policy changes become *this user's* changes (PLANNED):
 
 ## 23. Recommendation Engine
 
-The Recommendation Engine (PLANNED, Phase 7) converts an assessment into a deterministic action:
+The Recommendation Engine (Phase 2R v1) converts a personalized assessment into deterministic actions:
 
-- **Ordered rules.** A recommendation is an ordered list of `RecommendationRule` descriptors: each rule has a condition — predicate over (concept category, change type, impact band) — and a template: action title, description, and action kind (e.g., `REVIEW_SETTINGS`, `EXERCISE_DELETION`, `OPT_OUT_SHARING`, `NONE_REQUIRED`).
-- **Deterministic execution.** Rules are evaluated in declared order; matching rules emit recommendations; output is ranked by impact score, then rule order. No randomness, no model involvement.
-- **Deduplication.** Multiple rules matching the same (action kind, concept) collapse to the highest-scoring one.
-- **Idempotency.** Recommendations are persisted once per change set and remain stable until a new change set arrives; regeneration replaces the pending set atomically rather than accumulating duplicates.
+- **Ordered rules.** Rules are an ordered list of `RecommendationRule` descriptors, code-defined and frozen (`RECOMMENDATION_RULES_VERSION = 1`), never externalized to the database. Each rule conditions on (concept category, change type, impact band) and carries an action kind (`REVIEW_SETTINGS`, `EXERCISE_DELETION`, `OPT_OUT_SHARING`, `NONE_REQUIRED`). In Phase 2R, "concept category" is proxied by explicit concept-code sets (no category column exists). Concept-level rules condition on the user-specific `personalizedBand`; only the `NONE_REQUIRED` closure rule conditions on the assessment `aggregateBand`.
+- **Deterministic execution.** Rules are evaluated in declared order; matching rules emit recommendations; output is ranked by personalized score, then rule order, then concept code (final tie-break). No randomness, no model involvement.
+- **Deduplication.** Candidates matching the same `(action kind, concept)` collapse to the highest-scoring one (ties fall to lower rule order).
+- **Append-only idempotency (Phase 2R v1 interpretation).** Recommendations are persisted once per assessment and are never mutated or deleted. The current/pending recommendation set for a user is the set attached to the user's latest assessment; a new assessment supersedes the previous pending set by becoming the latest, while prior recommendations remain as history. This deliberately reinterprets the earlier "regeneration replaces the pending set atomically" wording to keep the pipeline append-only (see DECISIONS.md ADR-009).
+- **Closure.** When no concept-level rule fires and the aggregate band is NONE or LOW, exactly one assessment-level `NONE_REQUIRED` recommendation (null concept) is emitted — meaning "no actionable recommendation was generated for this assessment", not "the policy has no changes".
 - **Extensibility.** New rules are declarative additions to one package; the engine's execution semantics never change.
+
 
 ## 24. Scheduled Monitoring
 

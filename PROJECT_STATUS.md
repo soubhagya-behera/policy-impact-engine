@@ -423,7 +423,40 @@ DataIntegrityViolationException re-read, readOnly list/query APIs,
 no REST/auth/DTOs, diff/matching/ChangeImpact untouched,
 Testcontainers repository + integration tests — 380 tests passing).
 
-Phase 2Q = COMPLETE. Phase 2 overall = IN PROGRESS.
+Phase 2R slice implemented and tested successfully
+(Flyway V8 recommendation table referencing impact_assessment only —
+ownership is derived through assessment_id → impact_assessment.user_id
+with no duplicated user_id, following the V3/V4/V7
+no-duplicated-owner-FK convention — with partial UNIQUE indexes — (assessment_id, action_kind, concept_code)
+WHERE concept_code IS NOT NULL for (actionKind, conceptCode) dedup and
+(assessment_id) WHERE concept_code IS NULL for exactly one closure row —
+plus CHECK(rule_order >= 1), action-kind/band/score CHECKs and
+chk_recommendation_concept_code enforcing concept_code IS NULL iff
+action_kind = 'NONE_REQUIRED'; immutable append-only Recommendation entity,
+assessment-scoped RecommendationRepository (user isolation enforced through
+the user's assessment), frozen code-defined rule descriptors
+with RECOMMENDATION_RULES_VERSION = 1 and explicit concept-code sets as the
+concept-category proxy (no category column), pure
+DeterministicRecommendationEngine over ConceptItemScore items with
+personalizedBand conditions for rules 1–3, aggregateBand only for the
+REC-NONE-REQUIRED closure, dedup by (actionKind, conceptCode) keeping the
+highest score, ranking by score DESC → rule order ASC → conceptCode ASC,
+exactly one assessment-level NONE_REQUIRED with concept_code NULL when no
+rule fires and the aggregate band is NONE/LOW; four-rule v1 vocabulary
+REC-DELETION-RIGHTS-LOST (DELETION_RIGHTS + REMOVED/MODIFIED, band-less,
+ADDED ignored, diff-engine strengthening/weakening limitation documented),
+REC-SHARING-OPT-OUT (THIRD_PARTY_SHARING/ADVERTISING at MEDIUM+, LOCATION
+excluded, ADVERTISING intentionally mapped), REC-REVIEW-SETTINGS (any
+concept at MEDIUM+), REC-NONE-REQUIRED; RecommendationService with separate
+short transactions reusing getOrCreateAssessment, UNIQUE-backed
+DataIntegrityViolationException re-read, append-only interpretation of the
+pending set (recommendations attached to the user's latest assessment),
+engine/flush failure rollback leaving the committed assessment intact, no
+REST/auth/notifications/scheduler, V1–V7 and ChangeImpact/ImpactAssessment/
+EffectiveSensitivityResolver/observation pipeline untouched, Testcontainers
+repository + integration tests — 425 tests passing).
+
+Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2 overall = IN PROGRESS.
 
 Phase 2P notes:
 - User introduced without authentication (id + timestamps only; no
@@ -457,10 +490,10 @@ Phase 2N — COMPLETE
 Phase 2O — COMPLETE
 Phase 2P — COMPLETE
 Phase 2Q — COMPLETE
+Phase 2R — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- recommendations
 - PolicyFetchAttempt
 - scheduling
 - notifications
@@ -472,4 +505,4 @@ Do not mark Phase 2 complete yet.
 The next implementation task is the next Phase 2 slice (later pipeline
 stages),
 as scoped in ARCHITECTURE.md §31.
-Do not begin Phase 2R without explicit instruction.
+Wait for explicit instruction before beginning the next slice.
