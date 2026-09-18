@@ -1,0 +1,110 @@
+package com.soubhagya.policyimpactengine.monitoring.application;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.UUID;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptTrigger;
+import com.soubhagya.policyimpactengine.policy.application.PolicyObservationService;
+import com.soubhagya.policyimpactengine.policy.domain.Policy;
+import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
+import com.soubhagya.policyimpactengine.policy.domain.PolicyStatus;
+
+/**
+ * Phase 2T — scheduled observation triggering.
+ *
+ * <p>Single-instance, single-threaded, sequential: each fixed-delay tick
+ * loads the ACTIVE policies whose next check time has elapsed (in
+ * deterministic next-check/id order) and observes each one through the
+ * single shared {@link PolicyObservationService} pipeline with trigger
+ * {@code SCHEDULED}. One policy is observed at most once per tick, and no
+ * two checks of one policy can overlap within this phase.
+ *
+ * <p>Every completed check — {@code SUCCESS}, {@code SKIPPED_UNCHANGED},
+ * or {@code FAILED} — advances that policy's {@code next_check_at} by
+ * exactly the configured interval from the tick start. There is no
+ * catch-up for long-overdue policies, no backoff, no jitter, no retry,
+ * no claiming, and no stale-attempt reclamation in this phase; those
+ * belong to the follow-up claiming/retry slice, which also owns the real
+ * cross-instance and manual-vs-scheduler concurrency guarantees.
+ *
+ * <p>The tick itself holds no database transaction. A single policy's
+ * failure (already recorded as its {@code FAILED} attempt by the
+ * observation flow) never aborts the remaining due policies.
+ */
+@Service
+public class PolicyObservationScheduler {
+
+	private final PolicyRepository policyRepository;
+	private final PolicyObservationService observationService;
+	private final TransactionTemplate writeTransaction;
+	private final Clock clock;
+	private final Duration checkInterval;
+
+	public PolicyObservationScheduler(PolicyRepository policyRepository,
+			PolicyObservationService observationService,
+			PlatformTransactionManager transactionManager,
+			Clock clock,
+			@Value("${monitoring.check-interval:PT24H}") Duration checkInterval) {
+		if (policyRepository == null) {
+			throw new IllegalArgumentException("PolicyRepository must not be null");
+		}
+		if (observationService == null) {
+			throw new IllegalArgumentException("ObservationService must not be null");
+		}
+		if (transactionManager == null) {
+			throw new IllegalArgumentException("Transaction manager must not be null");
+		}
+		if (clock == null) {
+			throw new IllegalArgumentException("Clock must not be null");
+		}
+		if (checkInterval == null || checkInterval.isZero() || checkInterval.isNegative()) {
+			throw new IllegalArgumentException("Check interval must be a positive duration");
+		}
+		this.policyRepository = policyRepository;
+		this.observationService = observationService;
+		this.writeTransaction = new TransactionTemplate(transactionManager);
+		this.clock = clock;
+		this.checkInterval = checkInterval;
+	}
+
+	/**
+	 * Observes every due policy once, advancing each policy's next check
+	 * time by the configured interval from this tick's start.
+	 */
+	@Scheduled(fixedDelayString = "${monitoring.check-interval:PT24H}")
+	public void checkDuePolicies() {
+		Instant tickStart = clock.instant();
+		List<Policy> due = policyRepository
+				.findByStatusAndNextCheckAtLessThanEqualOrderByNextCheckAtAscIdAsc(
+						PolicyStatus.ACTIVE, tickStart);
+		for (Policy policy : due) {
+			try {
+				observationService.observe(policy.getId(), PolicyFetchAttemptTrigger.SCHEDULED);
+			}
+			catch (RuntimeException observationFailure) {
+				// The FAILED attempt is already recorded by the observation
+				// flow; continue with the remaining due policies.
+			}
+			advanceNextCheck(policy.getId(), tickStart);
+		}
+	}
+
+	private void advanceNextCheck(UUID policyId, Instant tickStart) {
+		writeTransaction.execute(status -> {
+			Policy policy = policyRepository.findById(policyId)
+					.orElseThrow(() -> new NoSuchElementException("Policy " + policyId + " not found"));
+			policy.setNextCheckAt(tickStart.plus(checkInterval));
+			return policyRepository.save(policy);
+		});
+	}
+}

@@ -481,7 +481,29 @@ and end-to-end integration tests incl. FAILED-row survival across
 version rollback, no-transaction-across-fetch proof, history ordering,
 and concurrent observations — 454 tests passing).
 
-Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2 overall = IN PROGRESS.
+Phase 2T slice implemented and tested successfully
+(Flyway V10 policy.next_check_at timestamptz NOT NULL backfilled to
+now() with a (status, next_check_at) due-selection index; V1–V9
+untouched; Policy gains nextCheckAt defaulting new registrations to
+immediately due; deterministic due query ACTIVE + next_check_at <= now
+ordered by next_check_at ASC, id ASC; PolicyObservationService gains an
+observe(policyId, trigger) overload with observe(policyId) delegating
+as MANUAL; single-threaded sequential PolicyObservationScheduler on a
+fixed-delay 24-hour configurable interval
+(monitoring.check-interval=PT24H driving both the tick delay and
+advancement, no kill-switch, no pool) observing each due policy once
+per tick with SCHEDULED through the single shared pipeline and
+advancing next_check_at by exactly the interval from the tick start on
+SUCCESS, SKIPPED_UNCHANGED, and FAILED alike with per-policy failure
+isolation; no retry/backoff/jitter/claiming/stale handling (deferred to
+the follow-up slice); single-instance scope documented in ADR-011;
+deterministic scheduler unit tests with a fixed Clock, Testcontainers
+due-selection tests incl. exact-now boundary, ARCHIVED exclusion,
+unsigned-id tie-break, backfill/NOT NULL/index checks, and end-to-end
+tick tests incl. failure isolation and single-observation-per-tick —
+471 tests passing).
+
+Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2T = COMPLETE. Phase 2 overall = IN PROGRESS.
 
 Phase 2P notes:
 - User introduced without authentication (id + timestamps only; no
@@ -517,10 +539,11 @@ Phase 2P — COMPLETE
 Phase 2Q — COMPLETE
 Phase 2R — COMPLETE
 Phase 2S — COMPLETE
+Phase 2T — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- scheduling
+- retry/claiming follow-up (backoff/jitter, atomic work claiming, stale-attempt handling)
 - notifications
 
 Do not mark Phase 2 complete yet.

@@ -130,22 +130,42 @@ public class PolicyObservationService {
 	}
 
 	/**
-	 * Observes the current live content of the given policy.
+	 * Observes the current live content of the given policy as a manual
+	 * check.
 	 *
 	 * @param policyId identifier of an already-registered policy
 	 * @return scalar observation result with a diff and similarity only for
 	 *         {@code NEW_VERSION}; never exposes JPA entities
 	 */
 	public PolicyObservationResult observe(UUID policyId) {
+		return observe(policyId, PolicyFetchAttemptTrigger.MANUAL);
+	}
+
+	/**
+	 * Observes the current live content of the given policy with an
+	 * explicit trigger ({@code MANUAL} for direct calls, {@code SCHEDULED}
+	 * for the monitoring scheduler). Exactly one fetch → extract →
+	 * normalize → hash → persist pipeline runs in either case; only the
+	 * recorded attempt trigger differs.
+	 *
+	 * @param policyId identifier of an already-registered policy
+	 * @param trigger what triggered this check; must not be null
+	 * @return scalar observation result with a diff and similarity only for
+	 *         {@code NEW_VERSION}; never exposes JPA entities
+	 */
+	public PolicyObservationResult observe(UUID policyId, PolicyFetchAttemptTrigger trigger) {
 		if (policyId == null) {
 			throw new IllegalArgumentException("Policy id must not be null");
+		}
+		if (trigger == null) {
+			throw new IllegalArgumentException("Trigger must not be null");
 		}
 
 		Policy policy = policyRepository.findById(policyId)
 				.orElseThrow(() -> new NoSuchElementException("Policy " + policyId + " not found"));
 
 		PolicyFetchAttempt attempt =
-				attemptService.beginAttempt(policy, PolicyFetchAttemptTrigger.MANUAL);
+				attemptService.beginAttempt(policy, trigger);
 
 		FetchResult fetched;
 		try {

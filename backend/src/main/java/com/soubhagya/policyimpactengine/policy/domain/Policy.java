@@ -44,6 +44,15 @@ public class Policy {
 	@Column(nullable = false, length = 32)
 	private PolicyStatus status;
 
+	/**
+	 * Next time this policy becomes eligible for a scheduled observation.
+	 * Advanced by the monitoring scheduler (Phase 2T) by the configured
+	 * interval after every completed check. New policies start due
+	 * immediately; tests may override via the setter.
+	 */
+	@Column(name = "next_check_at", nullable = false)
+	private Instant nextCheckAt;
+
 	@CreationTimestamp
 	@Column(nullable = false, updatable = false)
 	private Instant createdAt;
@@ -57,12 +66,14 @@ public class Policy {
 	}
 
 	/**
-	 * Creates a policy in its initial registration state.
+	 * Creates a policy in its initial registration state, immediately
+	 * eligible for its first scheduled check.
 	 */
 	public Policy(String name, String url) {
 		this.name = name;
 		this.url = url;
 		this.status = PolicyStatus.ACTIVE;
+		this.nextCheckAt = Instant.now();
 	}
 
 }

@@ -340,7 +340,9 @@ The Recommendation Engine (Phase 2R v1) converts a personalized assessment into 
 
 ## 24. Scheduled Monitoring
 
-The monitoring module (PLANNED, Phase 9) keeps policy data current without user action. It is an orchestrator above the pipeline, not a pipeline stage. **Observation-attempt recording is IMPLEMENTED (Phase 2S); scheduled triggering, work claiming, retry, and backoff below remain PLANNED.**
+The monitoring module (PLANNED, Phase 9) keeps policy data current without user action. It is an orchestrator above the pipeline, not a pipeline stage. **Observation-attempt recording is IMPLEMENTED (Phase 2S); scheduled triggering is IMPLEMENTED (Phase 2T, single-instance sequential ticks); retry, work claiming, and stale-attempt handling remain PLANNED.**
+
+- **Scheduled checks.** A Spring `@Scheduled` monitor enqueues work for each active policy whose next check time has elapsed; the default interval is configurable. **Implemented in Phase 2T** as a fixed-delay, single-threaded, sequential tick over ACTIVE policies with `next_check_at <= now` (deterministic next-check/id order, one observation per policy per tick, next check advanced by the configured interval from the tick start — including after failures; see DECISIONS.md ADR-011). Retry, backoff, claiming, and multi-instance operation remain planned.
 
 - **Scheduled checks.** A Spring `@Scheduled` monitor enqueues work for each active policy whose next check time has elapsed; the default interval is configurable.
 - **PolicyFetchAttempt.** Every check — scheduled or manual — is recorded as a `PolicyFetchAttempt` with its trigger, outcome, HTTP status, bytes fetched, duration, error message, and attempt number. **Implemented in Phase 2S** (Flyway V9 `policy_fetch_attempt` table; attempts are history with one sanctioned terminal transition; the only exercised trigger is `MANUAL`; see DECISIONS.md ADR-010).

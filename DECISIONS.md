@@ -187,4 +187,29 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Every check — including failed ones — leaves exactly one terminal attempt row, while version/change history keeps its all-or-nothing atomicity (the terminal `FAILED` update never joins the persistence transaction it reports on).
 - The scheduler slice inherits a complete, tested recording foundation: claiming and retry can be added without touching the observation flow.
 - The dependency exception is fenced: any monitoring→policy-application call before the scheduler phase would violate this ADR.
+- Phase 2T fulfills the fenced direction: the monitoring scheduler now drives `PolicyObservationService` (see ADR-011); the 2S recording edge (policy→monitoring) remains narrowly scoped to attempt recording only.
+
+---
+
+## ADR-011 — Scheduled Observation Triggering (Phase 2T)
+
+**Status:** Accepted
+
+**Context:** Phase 2S records every check but nothing triggers checks automatically. ARCHITECTURE.md §24 requires scheduled re-checks of active policies on a configurable interval, with retry/claiming specified for later. The full §24 bundle (triggering + retry + claiming + stale handling) is too large for one safe slice, so Phase 2T implements triggering only; retry/claiming/stale handling are deferred to an explicit follow-up slice.
+
+**Decision:**
+
+1. Scheduling state lives on the policy: Flyway V10 adds `policy.next_check_at` (timestamptz NOT NULL, backfilled to `now()` so existing policies are immediately eligible, no staggering) plus a `(status, next_check_at)` due-selection index. Scheduling state is not derived from attempt history. V1–V9 are untouched.
+2. A single-threaded sequential scheduler (`PolicyObservationScheduler`, Spring `@Scheduled` fixed-delay, no pool): each tick loads ACTIVE policies with `next_check_at <= now` in deterministic (next_check_at, id) order and observes each once through the single shared pipeline with trigger `SCHEDULED`.
+3. The observation interval defaults to 24 hours (`monitoring.check-interval=PT24H`), configurable through application configuration; the same `Duration` drives the fixed delay and `next_check_at` advancement. No kill-switch in Phase 2T.
+4. Every completed check advances `next_check_at` by exactly the interval from the tick start — `SUCCESS`, `SKIPPED_UNCHANGED`, and `FAILED` alike. No retry, backoff, jitter, or failure classification in Phase 2T; no catch-up for overdue policies (at most one observation per policy per tick).
+5. `observe(UUID policyId)` remains the `MANUAL` path and delegates to the new `observe(UUID policyId, PolicyFetchAttemptTrigger trigger)` overload. There is exactly one analysis pipeline; nothing is duplicated into the scheduler.
+6. One policy's failure (already recorded as its `FAILED` attempt) never aborts the tick; remaining due policies are still processed.
+7. Phase 2T is explicitly single-instance/single-thread. Atomic claiming, the partial-unique in-flight guard, stale-`IN_PROGRESS` reclamation, `attempt_number` chains, and the `PENDING` workflow all belong to the follow-up slice, which also owns the real cross-instance and manual-vs-scheduler concurrency guarantees.
+
+**Consequences:**
+
+- Policies are re-checked automatically on a uniform schedule with full attempt history; failures stay visible and do not stall the schedule.
+- A persistently failing policy re-checks every interval until the follow-up slice adds backoff — accepted as bounded and observable behavior.
+- The follow-up slice can add claiming/retry without touching the tick structure: due selection, the trigger overload, and attempt recording are already in place.
 
