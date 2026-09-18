@@ -24,6 +24,8 @@ import com.soubhagya.policyimpactengine.diff.PolicySimHash;
 import com.soubhagya.policyimpactengine.diff.SimHashDistance;
 import com.soubhagya.policyimpactengine.diff.SimHashSimilarity;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
@@ -70,6 +72,10 @@ class PolicySimHashIntegrationTest {
 
 	@Autowired
 	private PolicyVersionService versionService;
+	@Autowired
+	private PolicyFetchAttemptService attemptService;
+	@Autowired
+	private PolicyFetchAttemptRepository attemptRepository;
 
 	@Autowired
 	private PolicyChangeRecordRepository changeRepository;
@@ -89,6 +95,7 @@ class PolicySimHashIntegrationTest {
 
 	@BeforeEach
 	void cleanDatabase() {
+		attemptRepository.deleteAll();
 		changeRepository.deleteAll();
 		versionRepository.deleteAll();
 		policyRepository.deleteAll();
@@ -128,7 +135,7 @@ class PolicySimHashIntegrationTest {
 				transactionManager);
 		StubPolicyFetcher stubFetcher = new StubPolicyFetcher(firstHtml);
 		PolicyObservationService orchestrator = new PolicyObservationService(
-				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService);
+				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService, attemptService);
 
 		// Observation 1: FIRST_VERSION no similarity
 		PolicyObservationResult first = orchestrator.observe(policy.getId());

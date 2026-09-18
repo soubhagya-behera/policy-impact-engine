@@ -340,10 +340,10 @@ The Recommendation Engine (Phase 2R v1) converts a personalized assessment into 
 
 ## 24. Scheduled Monitoring
 
-The monitoring module (PLANNED, Phase 9) keeps policy data current without user action. It is an orchestrator above the pipeline, not a pipeline stage.
+The monitoring module (PLANNED, Phase 9) keeps policy data current without user action. It is an orchestrator above the pipeline, not a pipeline stage. **Observation-attempt recording is IMPLEMENTED (Phase 2S); scheduled triggering, work claiming, retry, and backoff below remain PLANNED.**
 
 - **Scheduled checks.** A Spring `@Scheduled` monitor enqueues work for each active policy whose next check time has elapsed; the default interval is configurable.
-- **PolicyFetchAttempt.** Every check — scheduled or manual — is recorded as a `PolicyFetchAttempt` with its trigger, outcome, HTTP status, bytes fetched, duration, error message, and attempt number.
+- **PolicyFetchAttempt.** Every check — scheduled or manual — is recorded as a `PolicyFetchAttempt` with its trigger, outcome, HTTP status, bytes fetched, duration, error message, and attempt number. **Implemented in Phase 2S** (Flyway V9 `policy_fetch_attempt` table; attempts are history with one sanctioned terminal transition; the only exercised trigger is `MANUAL`; see DECISIONS.md ADR-010).
 - **Statuses:** `PENDING`, `IN_PROGRESS`, `SUCCESS`, `FAILED`, `SKIPPED_UNCHANGED`. Transitions are explicit and recorded; there is no dangling in-progress state without a terminal outcome.
 - **Retry strategy.** Transient failures (timeouts, 5xx responses) retry up to a configured maximum; permanent failures (invalid or rejected URLs, 4xx) fail fast without retry.
 - **Exponential backoff with jitter.** Failed policies are re-checked on a growing delay with added randomness to avoid synchronized retry storms across many policies.

@@ -25,6 +25,8 @@ import com.soubhagya.policyimpactengine.intelligence.DeterministicConceptMatcher
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatch;
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRepository;
 import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConceptRepository;
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
@@ -67,6 +69,10 @@ class ConceptMatchPersistenceIntegrationTest {
 	@Autowired
 	private PolicyVersionService versionService;
 	@Autowired
+	private PolicyFetchAttemptService attemptService;
+	@Autowired
+	private PolicyFetchAttemptRepository attemptRepository;
+	@Autowired
 	private PlatformTransactionManager transactionManager;
 
 	private final PolicyContentExtractor extractor = new JsoupPolicyContentExtractor();
@@ -77,6 +83,7 @@ class ConceptMatchPersistenceIntegrationTest {
 
 	@BeforeEach
 	void clean() {
+		attemptRepository.deleteAll();
 		matchRepository.deleteAll();
 		changeRepository.deleteAll();
 		versionRepository.deleteAll();
@@ -162,21 +169,21 @@ class ConceptMatchPersistenceIntegrationTest {
 
 		PolicyObservationPersistenceService persistence = persistenceService(diffEngine, conceptMatcher);
 		PolicyObservationService orchestrator = new PolicyObservationService(policyRepository,
-				new StubFetcher(firstHtml), extractor, normalizer, hasher, persistence);
+				new StubFetcher(firstHtml), extractor, normalizer, hasher, persistence, attemptService);
 
 		PolicyObservationResult first = orchestrator.observe(policy.getId());
 		assertThat(first.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);
 		assertThat(matchRepository.count()).isZero();
 
 		StubFetcher secondFetcher = new StubFetcher(firstHtml);
-		PolicyObservationService orch2 = new PolicyObservationService(policyRepository, secondFetcher, extractor, normalizer, hasher, persistence);
+		PolicyObservationService orch2 = new PolicyObservationService(policyRepository, secondFetcher, extractor, normalizer, hasher, persistence, attemptService);
 		// Formatting unchanged check: second observation with same content -> UNCHANGED
 		PolicyObservationResult unchanged = orch2.observe(policy.getId());
 		assertThat(unchanged.outcome()).isEqualTo(PolicyVersionObservationOutcome.UNCHANGED);
 		assertThat(matchRepository.count()).isZero();
 
 		StubFetcher changedFetcher = new StubFetcher(changedHtml);
-		PolicyObservationService orch3 = new PolicyObservationService(policyRepository, changedFetcher, extractor, normalizer, hasher, persistence);
+		PolicyObservationService orch3 = new PolicyObservationService(policyRepository, changedFetcher, extractor, normalizer, hasher, persistence, attemptService);
 		PolicyObservationResult changed = orch3.observe(policy.getId());
 		assertThat(changed.outcome()).isEqualTo(PolicyVersionObservationOutcome.NEW_VERSION);
 		assertThat(changed.similarity()).isPresent();

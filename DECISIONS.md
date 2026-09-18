@@ -162,3 +162,29 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Ranking and deduplication are fully deterministic; the engine is a pure function of the assessment breakdowns and the aggregate band.
 - Ownership without duplication: because the assessment already binds a user to a version, storing `user_id` again on each recommendation would create a second, unenforced ownership fact; deriving it through the assessment keeps reads and writes to a single source of truth.
 
+---
+
+## ADR-010 — Observation Attempt Recording (Phase 2S)
+
+**Status:** Accepted
+
+**Context:** ARCHITECTURE.md §24 requires every policy check to be recorded as a `PolicyFetchAttempt`, but no attempt recording existed: observations ran the full pipeline with no trace of the check itself. Attempt rows are also the prerequisite the scheduler phase will claim and retry against, so recording must precede scheduling. The recording call necessarily flows from the existing policy orchestrator into the monitoring module, which touches the one-direction dependency rule (ARCHITECTURE.md §7).
+
+**Decision:**
+
+1. Flyway V9 creates the `policy_fetch_attempt` table only; V1–V8 are untouched. No scheduler state (`next_check_at`, claiming constraints, retry counters) is included.
+2. Attempt lifecycle mutability is explicitly sanctioned and narrow: a row is created `IN_PROGRESS` and transitions exactly once to `SUCCESS`, `FAILED`, or `SKIPPED_UNCHANGED`. Only `status`, `completed_at`, `duration_ms`, and `error_message` (plus the write-once fetch payload `http_status`/`bytes_fetched`, set by that same single transition) may change; `policy_id`, `trigger`, `attempt_number`, and `started_at` are strictly write-once. The entity guards the single transition; the schema enforces it with CHECK constraints. This is an intentional, bounded exception to the append-only history pattern, required by §24's explicit status-transition design.
+3. A single narrow `policy.application → monitoring.application` recording edge is allowed for Phase 2S: `PolicyObservationService` calls `PolicyFetchAttemptService` to begin and complete attempts. The boundary is strict — monitoring must not call back into policy application code in Phase 2S (the monitoring→policy direction arrives with the scheduler, which will drive the pipeline rather than be called by it). `PolicyFetchAttempt` is owned by the monitoring module and is not moved into policy.
+4. `PolicyObservationService.observe()` records trigger `MANUAL`. `SCHEDULED` remains schema/domain vocabulary, unused until the scheduler phase.
+5. Outcome mapping: `FIRST_VERSION`/`NEW_VERSION` → `SUCCESS`; `UNCHANGED` → `SKIPPED_UNCHANGED`; any fetch/extraction/normalization/hash/persistence failure → `FAILED` with the cause, then the original exception is rethrown unchanged (no new exception hierarchy).
+6. Failing to begin the attempt fails the observation fast; there is no silent unrecorded path.
+7. `bytes_fetched` is the documented UTF-8-byte-length approximation of the available response body (`null` when no response exists); exact wire-byte accounting is deferred and must not reshape the fetcher.
+8. Timing uses an injected `Clock` (system UTC in production, fixed/sequenced in tests).
+9. `PolicyObservationResult` is unchanged: attempt recording is internal orchestration/history, not part of the result contract.
+
+**Consequences:**
+
+- Every check — including failed ones — leaves exactly one terminal attempt row, while version/change history keeps its all-or-nothing atomicity (the terminal `FAILED` update never joins the persistence transaction it reports on).
+- The scheduler slice inherits a complete, tested recording foundation: claiming and retry can be added without touching the observation flow.
+- The dependency exception is fenced: any monitoring→policy-application call before the scheduler phase would violate this ADR.
+

@@ -456,7 +456,32 @@ REST/auth/notifications/scheduler, V1–V7 and ChangeImpact/ImpactAssessment/
 EffectiveSensitivityResolver/observation pipeline untouched, Testcontainers
 repository + integration tests — 425 tests passing).
 
-Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2 overall = IN PROGRESS.
+Phase 2S slice implemented and tested successfully
+(Flyway V9 policy_fetch_attempt table with trigger/status CHECKs,
+http_status/bytes/duration ranges, chk_attempt_completed tying terminal
+status to completed_at, and a per-policy newest-first index; no scheduler
+state; V1–V8 untouched; immutable-history PolicyFetchAttempt entity with
+exactly one sanctioned terminal transition guarded in code
+PENDING/IN_PROGRESS → SUCCESS/FAILED/SKIPPED_UNCHANGED; minimal
+PolicyFetchAttemptRepository with assessment-free newest-first history
+query; PolicyFetchAttemptService with separate short transactions and an
+injected Clock; MonitoringConfiguration observationClock bean;
+PolicyObservationService records trigger MANUAL around the unchanged
+pipeline (begin attempt → fetch with no DB transaction → persist →
+terminal update: FIRST_VERSION/NEW_VERSION → SUCCESS,
+UNCHANGED → SKIPPED_UNCHANGED, any failure → FAILED with the cause and
+the original exception rethrown; beginAttempt failure fails fast with no
+unrecorded path; bytes_fetched is the documented UTF-8 body-length
+approximation; PolicyObservationResult contract unchanged);
+narrow approved policy.application → monitoring.application recording
+edge with no monitoring→policy callbacks, recorded in ADR-010;
+deterministic unit tests with a manually advanced Clock, Testcontainers
+repository tests incl. CHECK/FK violations and write-once conventions,
+and end-to-end integration tests incl. FAILED-row survival across
+version rollback, no-transaction-across-fetch proof, history ordering,
+and concurrent observations — 454 tests passing).
+
+Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2 overall = IN PROGRESS.
 
 Phase 2P notes:
 - User introduced without authentication (id + timestamps only; no
@@ -491,10 +516,10 @@ Phase 2O — COMPLETE
 Phase 2P — COMPLETE
 Phase 2Q — COMPLETE
 Phase 2R — COMPLETE
+Phase 2S — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- PolicyFetchAttempt
 - scheduling
 - notifications
 

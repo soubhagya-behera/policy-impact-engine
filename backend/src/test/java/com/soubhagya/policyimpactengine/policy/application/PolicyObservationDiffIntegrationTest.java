@@ -24,6 +24,8 @@ import com.soubhagya.policyimpactengine.diff.PolicyDiffEngine;
 import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
 import com.soubhagya.policyimpactengine.diff.PolicySimHash;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
@@ -65,6 +67,10 @@ class PolicyObservationDiffIntegrationTest {
 
 	@Autowired
 	private PolicyVersionService versionService;
+	@Autowired
+	private PolicyFetchAttemptService attemptService;
+	@Autowired
+	private PolicyFetchAttemptRepository attemptRepository;
 
 	@Autowired
 	private PolicyChangeRecordRepository changeRepository;
@@ -81,6 +87,7 @@ class PolicyObservationDiffIntegrationTest {
 
 	@BeforeEach
 	void cleanDatabase() {
+		attemptRepository.deleteAll();
 		changeRepository.deleteAll();
 		versionRepository.deleteAll();
 		policyRepository.deleteAll();
@@ -122,7 +129,7 @@ class PolicyObservationDiffIntegrationTest {
 		PolicyObservationPersistenceService persistenceService = new PolicyObservationPersistenceService(
 				versionService, versionRepository, countingDiff, changeRepository, testSimHash, transactionManager);
 		PolicyObservationService orchestrator = new PolicyObservationService(
-				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService);
+				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService, attemptService);
 
 		PolicyObservationResult first = orchestrator.observe(policy.getId());
 		assertThat(first.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);

@@ -16,6 +16,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.soubhagya.policyimpactengine.diff.PolicySimHash;
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
@@ -56,6 +58,10 @@ class PolicyObservationServiceIntegrationTest {
 
 	@Autowired
 	private PolicyVersionService versionService;
+	@Autowired
+	private PolicyFetchAttemptService attemptService;
+	@Autowired
+	private PolicyFetchAttemptRepository attemptRepository;
 
 	@Autowired
 	private PolicySimHash simHash;
@@ -72,6 +78,7 @@ class PolicyObservationServiceIntegrationTest {
 
 	@BeforeEach
 	void cleanDatabase() {
+		attemptRepository.deleteAll();
 		changeRepository.deleteAll();
 		versionRepository.deleteAll();
 		policyRepository.deleteAll();
@@ -103,7 +110,7 @@ class PolicyObservationServiceIntegrationTest {
 		PolicyObservationPersistenceService persistenceService = new PolicyObservationPersistenceService(
 				versionService, versionRepository, diffEngine, changeRepository, simHash, transactionManager);
 		PolicyObservationService orchestrator = new PolicyObservationService(
-				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService);
+				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService, attemptService);
 
 		PolicyObservationResult first = orchestrator.observe(policy.getId());
 		assertThat(first.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);

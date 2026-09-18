@@ -26,6 +26,8 @@ import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
 import com.soubhagya.policyimpactengine.diff.PolicySimHash;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecord;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
@@ -65,6 +67,10 @@ class PolicyChangePersistenceIntegrationTest {
 
 	@Autowired
 	private PolicyVersionService versionService;
+	@Autowired
+	private PolicyFetchAttemptService attemptService;
+	@Autowired
+	private PolicyFetchAttemptRepository attemptRepository;
 
 	@Autowired
 	private PolicyDiffEngine diffEngine;
@@ -81,6 +87,7 @@ class PolicyChangePersistenceIntegrationTest {
 
 	@BeforeEach
 	void cleanDatabase() {
+		attemptRepository.deleteAll();
 		changeRepository.deleteAll();
 		versionRepository.deleteAll();
 		policyRepository.deleteAll();
@@ -318,7 +325,7 @@ class PolicyChangePersistenceIntegrationTest {
 
 	private PolicyObservationService observationService(PolicyFetcher fetcher, PolicyDiffEngine engine) {
 		return new PolicyObservationService(policyRepository, fetcher, extractor, normalizer, hasher,
-				persistenceService(engine));
+				persistenceService(engine), attemptService);
 	}
 
 	static class StubPolicyFetcher implements PolicyFetcher {

@@ -1,10 +1,14 @@
 package com.soubhagya.policyimpactengine.policy.application;
 
+import java.nio.charset.StandardCharsets;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttempt;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptTrigger;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.fetch.FetchResult;
@@ -20,7 +24,8 @@ import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
  * reimplementing any of them:
  *
  * <pre>
- * load policy → fetch → extract → normalize → hash → persist (version + changes)
+ * load policy → begin attempt → fetch → extract → normalize → hash →
+ * persist (version + changes) → complete attempt
  * </pre>
  *
  * <p>No URL validation, SSRF logic, response-size handling, HTML parsing,
@@ -41,14 +46,27 @@ import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
  *
  * <p><b>Transaction boundary:</b> this method is deliberately NOT
  * {@code @Transactional}. The policy lookup runs in the repository's own
- * short read transaction, the external HTTP fetch then executes with no
- * database transaction held open, and
+ * short read transaction, the attempt row is begun in its own short write
+ * transaction, the external HTTP fetch then executes with no database
+ * transaction held open, and
  * {@link PolicyObservationPersistenceService#store} owns the single short
  * persistence transaction (version creation plus change persistence, with
  * the pure in-memory diff inside it and no network I/O, followed by the
- * pure SimHash similarity outside the transaction). A single transaction
- * spanning lookup → network → parse → hash → persist would hold a database
- * connection across an unbounded external call.
+ * pure SimHash similarity outside the transaction). The terminal attempt
+ * update runs in its own short write transaction afterwards. A single
+ * transaction spanning lookup → network → parse → hash → persist would
+ * hold a database connection across an unbounded external call.
+ *
+ * <p><b>Attempt recording (Phase 2S):</b> every observation is recorded as
+ * a {@code PolicyFetchAttempt} with trigger {@code MANUAL} (the only
+ * trigger until the scheduler phase). {@code FIRST_VERSION} and
+ * {@code NEW_VERSION} complete as {@code SUCCESS}; {@code UNCHANGED}
+ * completes as {@code SKIPPED_UNCHANGED}. Any fetch, extraction,
+ * normalization, hashing, or persistence failure completes the attempt as
+ * {@code FAILED} — in its own transaction, so a version/change rollback
+ * still leaves the {@code FAILED} row behind — and then rethrows the
+ * original exception unchanged. If beginning the attempt itself fails, the
+ * observation fails fast with no silent unrecorded path.
  *
  * <p><b>Failure rules:</b> persistence failures propagate unchanged through
  * the persistence service — the transaction rolls back version and changes
@@ -71,6 +89,7 @@ public class PolicyObservationService {
 	private final PolicyTextNormalizer normalizer;
 	private final PolicyContentHasher hasher;
 	private final PolicyObservationPersistenceService persistenceService;
+	private final PolicyFetchAttemptService attemptService;
 
 	public PolicyObservationService(
 			PolicyRepository policyRepository,
@@ -78,7 +97,8 @@ public class PolicyObservationService {
 			PolicyContentExtractor extractor,
 			PolicyTextNormalizer normalizer,
 			PolicyContentHasher hasher,
-			PolicyObservationPersistenceService persistenceService) {
+			PolicyObservationPersistenceService persistenceService,
+			PolicyFetchAttemptService attemptService) {
 		if (policyRepository == null) {
 			throw new IllegalArgumentException("PolicyRepository must not be null");
 		}
@@ -97,12 +117,16 @@ public class PolicyObservationService {
 		if (persistenceService == null) {
 			throw new IllegalArgumentException("PolicyObservationPersistenceService must not be null");
 		}
+		if (attemptService == null) {
+			throw new IllegalArgumentException("AttemptService must not be null");
+		}
 		this.policyRepository = policyRepository;
 		this.fetcher = fetcher;
 		this.extractor = extractor;
 		this.normalizer = normalizer;
 		this.hasher = hasher;
 		this.persistenceService = persistenceService;
+		this.attemptService = attemptService;
 	}
 
 	/**
@@ -120,11 +144,67 @@ public class PolicyObservationService {
 		Policy policy = policyRepository.findById(policyId)
 				.orElseThrow(() -> new NoSuchElementException("Policy " + policyId + " not found"));
 
-		FetchResult fetched = fetcher.fetch(policy.getUrl());
-		String extracted = extractor.extract(fetched.body());
-		String normalized = normalizer.normalize(extracted);
-		String hash = hasher.hash(normalized);
+		PolicyFetchAttempt attempt =
+				attemptService.beginAttempt(policy, PolicyFetchAttemptTrigger.MANUAL);
 
-		return persistenceService.store(policyId, normalized, hash);
+		FetchResult fetched;
+		try {
+			fetched = fetcher.fetch(policy.getUrl());
+		}
+		catch (RuntimeException fetchFailure) {
+			attemptService.markFailed(attempt.getId(), null, null, messageOf(fetchFailure));
+			throw fetchFailure;
+		}
+		String extracted;
+		String normalized;
+		String hash;
+		try {
+			extracted = extractor.extract(fetched.body());
+			normalized = normalizer.normalize(extracted);
+			hash = hasher.hash(normalized);
+		}
+		catch (RuntimeException pipelineFailure) {
+			attemptService.markFailed(attempt.getId(), fetched.statusCode(),
+					byteLength(fetched.body()), messageOf(pipelineFailure));
+			throw pipelineFailure;
+		}
+		PolicyObservationResult result;
+		try {
+			result = persistenceService.store(policyId, normalized, hash);
+		}
+		catch (RuntimeException persistenceFailure) {
+			attemptService.markFailed(attempt.getId(), fetched.statusCode(),
+					byteLength(fetched.body()), messageOf(persistenceFailure));
+			throw persistenceFailure;
+		}
+		if (result.outcome() == PolicyVersionObservationOutcome.UNCHANGED) {
+			attemptService.markSkippedUnchanged(attempt.getId(), fetched.statusCode(),
+					byteLength(fetched.body()));
+		}
+		else {
+			attemptService.markSucceeded(attempt.getId(), fetched.statusCode(),
+					byteLength(fetched.body()));
+		}
+		return result;
+	}
+
+	/**
+	 * Approximates the fetched response size as the UTF-8 byte length of
+	 * the decoded body available to the orchestrator, or {@code null} when
+	 * no response exists. Wire bytes may differ (framing, charset); exact
+	 * accounting is deferred and must not reshape the fetcher in Phase 2S.
+	 */
+	private static Long byteLength(String body) {
+		if (body == null) {
+			return null;
+		}
+		return (long) body.getBytes(StandardCharsets.UTF_8).length;
+	}
+
+	private static String messageOf(RuntimeException failure) {
+		if (failure.getMessage() != null) {
+			return failure.getMessage();
+		}
+		return failure.getClass().getName();
 	}
 }

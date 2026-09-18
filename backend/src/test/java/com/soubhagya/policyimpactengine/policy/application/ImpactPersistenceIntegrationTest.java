@@ -28,6 +28,8 @@ import com.soubhagya.policyimpactengine.intelligence.ConceptMatcher;
 import com.soubhagya.policyimpactengine.intelligence.DeterministicConceptMatcher;
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRepository;
 import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConceptRepository;
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
@@ -57,7 +59,11 @@ class ImpactPersistenceIntegrationTest {
 	@Autowired private PrivacyConceptRepository conceptRepository;
 	@Autowired private ChangeConceptMatchRepository matchRepository;
 	@Autowired private ChangeImpactRepository impactRepository;
-	@Autowired private PolicyVersionService versionService;
+	@Autowired 	private PolicyVersionService versionService;
+	@Autowired
+	private PolicyFetchAttemptService attemptService;
+	@Autowired
+	private PolicyFetchAttemptRepository attemptRepository;
 	@Autowired private PlatformTransactionManager transactionManager;
 
 	private final PolicyContentExtractor extractor = new JsoupPolicyContentExtractor();
@@ -69,6 +75,7 @@ class ImpactPersistenceIntegrationTest {
 
 	@BeforeEach
 	void clean() {
+		attemptRepository.deleteAll();
 		impactRepository.deleteAll();
 		matchRepository.deleteAll();
 		changeRepository.deleteAll();
@@ -180,16 +187,16 @@ class ImpactPersistenceIntegrationTest {
 		String firstHtml = "<html><body><h1>Privacy Policy</h1><p>We collect data.</p></body></html>";
 		String changedHtml = "<html><body><h1>Privacy Policy</h1><p>We collect your precise location data and share it with third-party advertising partners.</p><p>We retain data for 90 days.</p></body></html>";
 		PolicyObservationPersistenceService persistence = persistenceService(diffEngine, conceptMatcher, scoringEngine);
-		PolicyObservationService orch = new PolicyObservationService(policyRepository, new StubFetcher(firstHtml), extractor, normalizer, hasher, persistence);
+		PolicyObservationService orch = new PolicyObservationService(policyRepository, new StubFetcher(firstHtml), extractor, normalizer, hasher, persistence, attemptService);
 		PolicyObservationResult first = orch.observe(policy.getId());
 		assertThat(first.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);
 		assertThat(impactRepository.count()).isZero();
-		PolicyObservationService orch2 = new PolicyObservationService(policyRepository, new StubFetcher(changedHtml), extractor, normalizer, hasher, persistence);
+		PolicyObservationService orch2 = new PolicyObservationService(policyRepository, new StubFetcher(changedHtml), extractor, normalizer, hasher, persistence, attemptService);
 		PolicyObservationResult changed = orch2.observe(policy.getId());
 		assertThat(changed.outcome()).isEqualTo(PolicyVersionObservationOutcome.NEW_VERSION);
 		assertThat(changed.similarity()).isPresent();
 		assertThat(impactRepository.count()).isGreaterThan(0);
-		PolicyObservationService orch3 = new PolicyObservationService(policyRepository, new StubFetcher(changedHtml), extractor, normalizer, hasher, persistence);
+		PolicyObservationService orch3 = new PolicyObservationService(policyRepository, new StubFetcher(changedHtml), extractor, normalizer, hasher, persistence, attemptService);
 		PolicyObservationResult repeat = orch3.observe(policy.getId());
 		assertThat(repeat.outcome()).isEqualTo(PolicyVersionObservationOutcome.UNCHANGED);
 		assertThat(impactRepository.count()).isEqualTo(impactRepository.count());
