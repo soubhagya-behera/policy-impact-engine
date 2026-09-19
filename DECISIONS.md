@@ -213,3 +213,28 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - A persistently failing policy re-checks every interval until the follow-up slice adds backoff — accepted as bounded and observable behavior.
 - The follow-up slice can add claiming/retry without touching the tick structure: due selection, the trigger overload, and attempt recording are already in place.
 
+---
+
+## ADR-012 — Atomic Work Claiming (Phase 2U)
+
+**Status:** Accepted
+
+**Context:** Phase 2T triggers scheduled checks but nothing serializes concurrent triggers for the same policy: two manual calls, two scheduler ticks (across instances), or a manual call racing the tick could fetch the same policy in parallel, duplicating HTTP work and racing version writes. ARCHITECTURE.md §24 requires atomic work claiming backed by a database constraint. Retry/backoff/jitter and stale-attempt recovery are explicitly out of scope and belong to Phase 2U.1/2U.2.
+
+**Decision:**
+
+1. The claim boundary is `PolicyFetchAttempt` — no claim/lock columns on `Policy`, no ShedLock, no advisory locks, no Redis or external locking.
+2. Flyway V11 adds exactly one schema object: the partial unique index `uq_policy_fetch_attempt_inflight ON policy_fetch_attempt (policy_id) WHERE (status IN ('PENDING', 'IN_PROGRESS'))`. At most one non-terminal attempt may exist per policy; terminal rows are unaffected history. V1–V10 are untouched. No stale-reaper index is created preemptively.
+3. The claim algorithm runs in a single short transaction with no HTTP inside: insert a `PENDING` candidate (`attempt_number = 1`), then run the conditional claim `UPDATE policy_fetch_attempt SET status = 'IN_PROGRESS', started_at = :now WHERE id = :attemptId AND status = 'PENDING'`. Affected rows = 1 wins and runs the unchanged observation pipeline; the loser's insert collides with the V11 index, leaves no second runnable row, and performs no fetch.
+4. `PolicyFetchAttemptService.beginAttempt` is the single shared claim path for both triggers; `observe(UUID)` still delegates as `MANUAL` to `observe(UUID, trigger)`. There is exactly one observation pipeline — nothing is duplicated into the scheduler.
+5. Collision behavior is explicit rejection, not coalescing: MANUAL propagates `PolicyFetchClaimRejectedException` (a domain/application exception, no fetch, no terminal row for the loser); SCHEDULED catches it in the tick, skips the policy for that cycle, and still advances its `next_check_at` uniformly.
+6. Attempts stay append-only: the only lifecycle is `PENDING → IN_PROGRESS → SUCCESS / FAILED / SKIPPED_UNCHANGED`. No terminal row is ever mutated back, and no `FAILED → PENDING` chain exists yet.
+7. `next_check_at` semantics are unchanged Phase 2T semantics (uniform advancement on `SUCCESS`, `SKIPPED_UNCHANGED`, and `FAILED` alike, plus on claim-skips); `attempt_number` stays 1; `PolicyFetchException` is untouched and no failure classification exists.
+8. Stale `IN_PROGRESS` rows are explicitly accepted until Phase 2U.2: no stale timeout, no reaper, no reclaim, no re-enqueue. No new dependencies of any kind.
+
+**Consequences:**
+
+- Concurrent triggers for the same policy cannot both fetch — at most one reaches HTTP — and the guarantee comes from PostgreSQL, so it holds across application instances with no Java synchronization.
+- A JVM crash between claim and terminal update leaves an `IN_PROGRESS` row that blocks later checks for that policy until Phase 2U.2; this limitation is accepted and documented, not silently worked around.
+- Phase 2U.1 (retry/backoff/jitter) and Phase 2U.2 (stale recovery) build directly on this foundation without touching the tick structure, the pipeline, or the claim path.
+

@@ -27,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchClaimRejectedException;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttempt;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptTrigger;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
@@ -317,6 +318,23 @@ class PolicyObservationServiceTest {
 				.hasMessageContaining("attempt store down");
 
 		verifyNoInteractions(fetcher, extractor, normalizer, hasher, persistenceService);
+	}
+
+	@Test
+	void lostClaimIsRejectedWithoutFetchAndWithoutTerminalUpdate() {
+		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
+		when(policyRepository.findById(policy.getId())).thenReturn(Optional.of(policy));
+		when(attemptService.beginAttempt(eq(policy), eq(PolicyFetchAttemptTrigger.MANUAL)))
+				.thenThrow(new PolicyFetchClaimRejectedException(policy.getId()));
+
+		assertThatThrownBy(() -> service.observe(policy.getId()))
+				.isInstanceOf(PolicyFetchClaimRejectedException.class)
+				.hasMessageContaining(policy.getId().toString());
+
+		verifyNoInteractions(fetcher, extractor, normalizer, hasher, persistenceService);
+		verify(attemptService, never()).markSucceeded(any(), any(), any());
+		verify(attemptService, never()).markSkippedUnchanged(any(), any(), any());
+		verify(attemptService, never()).markFailed(any(), any(), any(), any());
 	}
 
 	@Test

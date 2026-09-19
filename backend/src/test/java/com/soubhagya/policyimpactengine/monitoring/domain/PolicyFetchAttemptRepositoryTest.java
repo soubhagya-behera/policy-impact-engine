@@ -79,6 +79,12 @@ class PolicyFetchAttemptRepositoryTest {
 		Policy policy = registeredPolicy();
 		PolicyFetchAttempt older = attemptRepository.saveAndFlush(
 				new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.MANUAL, 1, Instant.parse("2026-09-18T10:00:00Z")));
+		// Phase 2U: at most one PENDING/IN_PROGRESS attempt may exist per
+		// policy (V11 partial unique index), so history rows after the first
+		// must start from a terminal row.
+		older.complete(PolicyFetchAttemptStatus.SUCCESS, 200, 1L, null,
+				Instant.parse("2026-09-18T10:00:01Z"));
+		attemptRepository.saveAndFlush(older);
 		PolicyFetchAttempt newer = attemptRepository.saveAndFlush(
 				new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.MANUAL, 1, Instant.parse("2026-09-18T10:05:00Z")));
 

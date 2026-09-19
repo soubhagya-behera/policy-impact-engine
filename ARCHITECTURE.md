@@ -340,17 +340,17 @@ The Recommendation Engine (Phase 2R v1) converts a personalized assessment into 
 
 ## 24. Scheduled Monitoring
 
-The monitoring module (PLANNED, Phase 9) keeps policy data current without user action. It is an orchestrator above the pipeline, not a pipeline stage. **Observation-attempt recording is IMPLEMENTED (Phase 2S); scheduled triggering is IMPLEMENTED (Phase 2T, single-instance sequential ticks); retry, work claiming, and stale-attempt handling remain PLANNED.**
+The monitoring module (PLANNED, Phase 9) keeps policy data current without user action. It is an orchestrator above the pipeline, not a pipeline stage. **Observation-attempt recording is IMPLEMENTED (Phase 2S); scheduled triggering is IMPLEMENTED (Phase 2T, single-instance sequential ticks); atomic work claiming is IMPLEMENTED (Phase 2U, V11 partial-unique in-flight guard plus conditional claim, cross-instance); retry/backoff/jitter and stale-attempt handling remain PLANNED (Phase 2U.1/2U.2).**
 
 - **Scheduled checks.** A Spring `@Scheduled` monitor enqueues work for each active policy whose next check time has elapsed; the default interval is configurable. **Implemented in Phase 2T** as a fixed-delay, single-threaded, sequential tick over ACTIVE policies with `next_check_at <= now` (deterministic next-check/id order, one observation per policy per tick, next check advanced by the configured interval from the tick start — including after failures; see DECISIONS.md ADR-011). Retry, backoff, claiming, and multi-instance operation remain planned.
 
 - **Scheduled checks.** A Spring `@Scheduled` monitor enqueues work for each active policy whose next check time has elapsed; the default interval is configurable.
 - **PolicyFetchAttempt.** Every check — scheduled or manual — is recorded as a `PolicyFetchAttempt` with its trigger, outcome, HTTP status, bytes fetched, duration, error message, and attempt number. **Implemented in Phase 2S** (Flyway V9 `policy_fetch_attempt` table; attempts are history with one sanctioned terminal transition; the only exercised trigger is `MANUAL`; see DECISIONS.md ADR-010).
-- **Statuses:** `PENDING`, `IN_PROGRESS`, `SUCCESS`, `FAILED`, `SKIPPED_UNCHANGED`. Transitions are explicit and recorded; there is no dangling in-progress state without a terminal outcome.
+- **Statuses:** `PENDING`, `IN_PROGRESS`, `SUCCESS`, `FAILED`, `SKIPPED_UNCHANGED`. Transitions are explicit and recorded; a crashed worker may leave an `IN_PROGRESS` row without a terminal outcome until the stale-recovery slice (Phase 2U.2).
 - **Retry strategy.** Transient failures (timeouts, 5xx responses) retry up to a configured maximum; permanent failures (invalid or rejected URLs, 4xx) fail fast without retry.
 - **Exponential backoff with jitter.** Failed policies are re-checked on a growing delay with added randomness to avoid synchronized retry storms across many policies.
-- **Concurrency control.** Work is claimed atomically in the database (`UPDATE ... SET status='IN_PROGRESS' WHERE status='PENDING' ...`), backed by a partial unique constraint preventing two in-flight fetches of the same policy.
-- **Prevention of concurrent fetches for the same policy.** Manual "check now" requests and the scheduler share the same attempt-claiming path, so both are serialized by the same database constraint. A second trigger while a fetch is in flight is rejected or coalesced, never run in parallel.
+- **Concurrency control.** **IMPLEMENTED (Phase 2U).** Work is claimed atomically in the database (insert `PENDING`, then `UPDATE ... SET status='IN_PROGRESS' WHERE status='PENDING' ...` in one short transaction), backed by the V11 partial unique index preventing two in-flight attempts for the same policy.
+- **Prevention of concurrent fetches for the same policy.** **IMPLEMENTED (Phase 2U).** Manual "check now" requests and the scheduler share the same attempt-claiming path, so both are serialized by the same database constraint. A second trigger while a fetch is in flight is rejected (`PolicyFetchClaimRejectedException` for MANUAL) or skipped for the cycle (SCHEDULED), never run in parallel.
 
 ## 25. Notifications
 

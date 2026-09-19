@@ -118,6 +118,29 @@ class PolicyObservationSchedulerTest {
 	}
 
 	@Test
+	void lostClaimSkipsPolicyForThisCycleButStillAdvancesNextCheck() {
+		Policy claimed = policy("Claimed");
+		Policy healthy = policy("Healthy");
+		when(policyRepository
+				.findByStatusAndNextCheckAtLessThanEqualOrderByNextCheckAtAscIdAsc(
+						PolicyStatus.ACTIVE, TICK_START))
+				.thenReturn(List.of(claimed, healthy));
+		givenTransaction();
+		when(policyRepository.findById(claimed.getId())).thenReturn(Optional.of(claimed));
+		when(policyRepository.findById(healthy.getId())).thenReturn(Optional.of(healthy));
+		when(policyRepository.save(any(Policy.class)))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		when(observationService.observe(eq(claimed.getId()), eq(PolicyFetchAttemptTrigger.SCHEDULED)))
+				.thenThrow(new PolicyFetchClaimRejectedException(claimed.getId()));
+
+		scheduler.checkDuePolicies();
+
+		verify(observationService).observe(healthy.getId(), PolicyFetchAttemptTrigger.SCHEDULED);
+		assertThat(claimed.getNextCheckAt()).isEqualTo(TICK_START.plus(INTERVAL));
+		assertThat(healthy.getNextCheckAt()).isEqualTo(TICK_START.plus(INTERVAL));
+	}
+
+		@Test
 	void emptyDueListTouchesNothing() {
 		when(policyRepository
 				.findByStatusAndNextCheckAtLessThanEqualOrderByNextCheckAtAscIdAsc(

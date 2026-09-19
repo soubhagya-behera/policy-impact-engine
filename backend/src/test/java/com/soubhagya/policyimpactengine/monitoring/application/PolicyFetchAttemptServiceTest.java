@@ -3,6 +3,8 @@ package com.soubhagya.policyimpactengine.monitoring.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
 
@@ -62,23 +65,61 @@ class PolicyFetchAttemptServiceTest {
 	}
 
 	@Test
-	void beginAttemptPersistsInProgressRowWithAttemptNumberOne() {
+	void beginAttemptClaimsPendingCandidateAsInProgressWithAttemptNumberOne() {
 		givenTransaction();
 		Policy policy = registeredPolicy();
 		when(attemptRepository.saveAndFlush(any(PolicyFetchAttempt.class)))
 				.thenAnswer(invocation -> invocation.getArgument(0));
+		when(attemptRepository.claimPendingAttempt(any(), eq(PolicyFetchAttemptStatus.PENDING),
+				eq(PolicyFetchAttemptStatus.IN_PROGRESS), eq(clock.instant())))
+				.thenReturn(1);
+		PolicyFetchAttempt claimed = new PolicyFetchAttempt(policy,
+				PolicyFetchAttemptTrigger.MANUAL, 1, clock.instant());
+		when(attemptRepository.findById(any())).thenReturn(Optional.of(claimed));
 
 		PolicyFetchAttempt attempt = service.beginAttempt(policy, PolicyFetchAttemptTrigger.MANUAL);
 
 		ArgumentCaptor<PolicyFetchAttempt> captor = ArgumentCaptor.forClass(PolicyFetchAttempt.class);
 		verify(attemptRepository).saveAndFlush(captor.capture());
-		assertThat(captor.getValue().getStatus()).isEqualTo(PolicyFetchAttemptStatus.IN_PROGRESS);
+		assertThat(captor.getValue().getStatus()).isEqualTo(PolicyFetchAttemptStatus.PENDING);
 		assertThat(captor.getValue().getAttemptNumber()).isEqualTo(1);
 		assertThat(captor.getValue().getStartedAt()).isEqualTo(clock.instant());
 		assertThat(captor.getValue().getTrigger()).isEqualTo(PolicyFetchAttemptTrigger.MANUAL);
 		assertThat(captor.getValue().getPolicy().getId()).isEqualTo(policy.getId());
 		assertThat(captor.getValue().getCompletedAt()).isNull();
-		assertThat(attempt).isSameAs(captor.getValue());
+		verify(attemptRepository).claimPendingAttempt(any(),
+				eq(PolicyFetchAttemptStatus.PENDING),
+				eq(PolicyFetchAttemptStatus.IN_PROGRESS),
+				eq(clock.instant()));
+		assertThat(attempt).isSameAs(claimed);
+	}
+
+	@Test
+	void beginAttemptCollisionBecomesClaimRejected() {
+		givenTransaction();
+		Policy policy = registeredPolicy();
+		when(attemptRepository.saveAndFlush(any(PolicyFetchAttempt.class)))
+				.thenThrow(new DataIntegrityViolationException("uq_policy_fetch_attempt_inflight"));
+
+		assertThatThrownBy(() -> service.beginAttempt(policy, PolicyFetchAttemptTrigger.MANUAL))
+				.isInstanceOf(PolicyFetchClaimRejectedException.class)
+				.hasMessageContaining(policy.getId().toString());
+
+		verify(attemptRepository, never()).claimPendingAttempt(any(), any(), any(), any());
+	}
+
+	@Test
+	void beginAttemptLostClaimIsRejected() {
+		givenTransaction();
+		Policy policy = registeredPolicy();
+		when(attemptRepository.saveAndFlush(any(PolicyFetchAttempt.class)))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		when(attemptRepository.claimPendingAttempt(any(), any(), any(), any()))
+				.thenReturn(0);
+
+		assertThatThrownBy(() -> service.beginAttempt(policy, PolicyFetchAttemptTrigger.SCHEDULED))
+				.isInstanceOf(PolicyFetchClaimRejectedException.class)
+				.hasMessageContaining(policy.getId().toString());
 	}
 
 	@Test

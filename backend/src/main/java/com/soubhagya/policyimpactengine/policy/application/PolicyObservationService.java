@@ -57,16 +57,23 @@ import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
  * transaction spanning lookup → network → parse → hash → persist would
  * hold a database connection across an unbounded external call.
  *
- * <p><b>Attempt recording (Phase 2S):</b> every observation is recorded as
- * a {@code PolicyFetchAttempt} with trigger {@code MANUAL} (the only
- * trigger until the scheduler phase). {@code FIRST_VERSION} and
- * {@code NEW_VERSION} complete as {@code SUCCESS}; {@code UNCHANGED}
+ * <p><b>Attempt recording and claiming (Phase 2S/2U):</b> every
+ * observation is recorded as a {@code PolicyFetchAttempt} and claimed
+ * through the single shared {@link PolicyFetchAttemptService#beginAttempt}
+ * path used by both the {@code MANUAL} entry point and the
+ * {@code SCHEDULED} tick: a {@code PENDING} row is created and then
+ * promoted with the conditional claim update inside one short
+ * transaction, guarded by the V11 partial unique index. {@code FIRST_VERSION}
+ * and {@code NEW_VERSION} complete as {@code SUCCESS}; {@code UNCHANGED}
  * completes as {@code SKIPPED_UNCHANGED}. Any fetch, extraction,
  * normalization, hashing, or persistence failure completes the attempt as
  * {@code FAILED} — in its own transaction, so a version/change rollback
  * still leaves the {@code FAILED} row behind — and then rethrows the
- * original exception unchanged. If beginning the attempt itself fails, the
- * observation fails fast with no silent unrecorded path.
+ * original exception unchanged. If beginning (claiming) the attempt itself
+ * fails, the observation fails fast with no silent unrecorded path and no
+ * fetch: in particular a lost claim surfaces
+ * {@link com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchClaimRejectedException}
+ * and performs no HTTP work, leaving no second runnable row.
  *
  * <p><b>Failure rules:</b> persistence failures propagate unchanged through
  * the persistence service — the transaction rolls back version and changes

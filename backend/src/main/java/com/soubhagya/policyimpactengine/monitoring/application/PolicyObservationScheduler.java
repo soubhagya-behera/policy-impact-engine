@@ -33,9 +33,16 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyStatus;
  * or {@code FAILED} — advances that policy's {@code next_check_at} by
  * exactly the configured interval from the tick start. There is no
  * catch-up for long-overdue policies, no backoff, no jitter, no retry,
- * no claiming, and no stale-attempt reclamation in this phase; those
- * belong to the follow-up claiming/retry slice, which also owns the real
- * cross-instance and manual-vs-scheduler concurrency guarantees.
+ * and no stale-attempt reclamation in this phase; those belong to the
+ * follow-up retry/stale slices.
+ *
+ * <p>Phase 2U atomic claiming: every tick entry goes through the single
+ * shared {@link PolicyObservationService} claim path, so a scheduled check
+ * racing another trigger for the same policy is serialized by the V11
+ * partial unique index. A lost claim surfaces as
+ * {@link PolicyFetchClaimRejectedException}; the tick skips that policy
+ * for this cycle (no fetch, no duplicate work) and still advances its
+ * {@code next_check_at} uniformly.
  *
  * <p>The tick itself holds no database transaction. A single policy's
  * failure (already recorded as its {@code FAILED} attempt by the
@@ -90,6 +97,12 @@ public class PolicyObservationScheduler {
 		for (Policy policy : due) {
 			try {
 				observationService.observe(policy.getId(), PolicyFetchAttemptTrigger.SCHEDULED);
+			}
+			catch (PolicyFetchClaimRejectedException claimedElsewhere) {
+				// Another trigger owns this policy right now: skip it for
+				// this cycle without fetching. Its next check still
+				// advances uniformly below; retry and stale recovery belong
+				// to Phase 2U.1/2U.2.
 			}
 			catch (RuntimeException observationFailure) {
 				// The FAILED attempt is already recorded by the observation

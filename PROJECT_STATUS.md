@@ -266,7 +266,10 @@ Completed (Phase 2O — System-Level Concept Impact Scoring):
 - PolicyObservationPersistenceService extends same short TransactionTemplate to version+changes+matches+impacts atomically: observe→predecessor→diff→persist changes→match→persist matches→score→persist ChangeImpacts sorted by changeOrder/conceptCode; impact scoring/persistence failure rolls back all four tables; SimHash remains outside TX unchanged (SHA-256 authoritative, no section criticality yet fixed at 1)
 - DeterministicImpactScoringEngineTest (20 pure unit tests: weight×multiplier×base/normalized/band for LOCATION/THIRD_PARTY/COOKIES variants, multiplier correctness, LOW/MEDIUM/HIGH/CRITICAL/NONE boundaries, deterministic ordering/repeated, empty/null handling, no user sensitivity, plus golden pinning) + ChangeImpactRepositoryTest (Testcontainers: V5 applied, persist/retrieve, UNIQUE violation, ordering, immutability) + ImpactPersistenceIntegrationTest (Testcontainers: FIRST_VERSION 0 impacts, UNCHANGED 0, NEW_VERSION with LOCATION/THIRD_PARTY/ADVERTISING/DATA_RETENTION exact 80/100/70/60 CRITICAL/HIGH scores and traceable evidence→match→change, zero-changes/zero-matches zero impacts, repeat UNCHANGED no new impacts, orchestrator full flow with SimHash preserved, scorer failure rollback no partial rows) — 333 tests passing, BUILD SUCCESS
 
-Remaining Phase 2 scope will be built in later slices (redirect revalidation and later pipeline stages).
+Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
+- similarity calibration/near-duplicate policy if actually required
+- retry/claiming follow-up (backoff/jitter, stale-attempt handling — atomic claiming itself is DONE in Phase 2U)
+- notifications
 
 ## Current Status
 
@@ -500,10 +503,35 @@ the follow-up slice); single-instance scope documented in ADR-011;
 deterministic scheduler unit tests with a fixed Clock, Testcontainers
 due-selection tests incl. exact-now boundary, ARCHIVED exclusion,
 unsigned-id tie-break, backfill/NOT NULL/index checks, and end-to-end
-tick tests incl. failure isolation and single-observation-per-tick —
-471 tests passing).
+ tick tests incl. failure isolation and single-observation-per-tick —
+ 471 tests passing).
 
-Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2T = COMPLETE. Phase 2 overall = IN PROGRESS.
+Phase 2U slice implemented and tested successfully
+(Flyway V11 partial unique index uq_policy_fetch_attempt_inflight on
+policy_fetch_attempt (policy_id) WHERE status IN
+('PENDING','IN_PROGRESS') — the database-enforced cross-instance
+invariant; V1–V10 untouched; PolicyFetchAttempt gains a pending factory
+and the repository gains the single conditional claim update
+PENDING → IN_PROGRESS stamping started_at; PolicyFetchAttemptService
+beginAttempt is the single shared claim path (insert PENDING with
+attempt_number=1, then conditional claim, in one short transaction, no
+HTTP inside; uniqueness collisions translate to
+PolicyFetchClaimRejectedException); MANUAL and SCHEDULED observations
+enter the same claim path through the unchanged observe pipeline —
+MANUAL collisions reject explicitly with no fetch and no second row,
+SCHEDULED collisions skip the policy for the cycle with uniform
+next_check_at advancement; attempts stay append-only
+PENDING → IN_PROGRESS → SUCCESS / FAILED / SKIPPED_UNCHANGED with
+Phase 2T next_check_at semantics unchanged; no retry/backoff/jitter
+(Phase 2U.1), no stale recovery (Phase 2U.2), no new dependencies;
+documented in ADR-012; deterministic unit tests plus Testcontainers
+concurrency tests incl. MANUAL/MANUAL, SCHEDULED/SCHEDULED and
+MANUAL/SCHEDULED races with exactly one fetch, the partial-unique
+invariant, exactly-once conditional claim, terminal lifecycle with no
+reclaim, independent different-policy claims, and scheduler skip —
+483 tests passing).
+
+Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2T = COMPLETE. Phase 2U = COMPLETE. Phase 2 overall = IN PROGRESS.
 
 Phase 2P notes:
 - User introduced without authentication (id + timestamps only; no
@@ -540,10 +568,11 @@ Phase 2Q — COMPLETE
 Phase 2R — COMPLETE
 Phase 2S — COMPLETE
 Phase 2T — COMPLETE
+Phase 2U — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- retry/claiming follow-up (backoff/jitter, atomic work claiming, stale-attempt handling)
+- retry/backoff/jitter follow-up (Phase 2U.1) and stale-attempt recovery (Phase 2U.2)
 - notifications
 
 Do not mark Phase 2 complete yet.

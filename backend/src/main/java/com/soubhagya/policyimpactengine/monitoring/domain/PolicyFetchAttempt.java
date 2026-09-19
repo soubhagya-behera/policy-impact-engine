@@ -38,6 +38,9 @@ import lombok.Getter;
  * exactly once. {@code policy}, {@code trigger}, {@code attemptNumber}, and
  * {@code startedAt} are strictly write-once ({@code updatable = false}).
  * There are no other mutation paths: no setters.
+ *
+ * <p>Phase 2U atomic claiming uses {@link #pending} plus a conditional claim
+ * update; see that factory for the claim-time {@code startedAt} rule.
  */
 @Entity
 @Table(name = "policy_fetch_attempt")
@@ -110,6 +113,23 @@ public class PolicyFetchAttempt {
 		this.status = PolicyFetchAttemptStatus.IN_PROGRESS;
 		this.attemptNumber = attemptNumber;
 		this.startedAt = startedAt;
+	}
+
+	/**
+	 * Creates a pending claim candidate for Phase 2U atomic work claiming.
+	 * The row is not runnable until the claim service promotes it with the
+	 * conditional {@code UPDATE ... WHERE status = 'PENDING'}; at most one
+	 * {@code PENDING}/{@code IN_PROGRESS} row per policy may exist
+	 * (V11 partial unique index). The claim stamps {@code startedAt} at
+	 * claim time, so the provisional creation timestamp given here is
+	 * replaced when work actually starts. Phase 2U attempts use
+	 * {@code attemptNumber = 1}; retry numbering belongs to Phase 2U.1.
+	 */
+	public static PolicyFetchAttempt pending(Policy policy, PolicyFetchAttemptTrigger trigger,
+			int attemptNumber, Instant startedAt) {
+		PolicyFetchAttempt attempt = new PolicyFetchAttempt(policy, trigger, attemptNumber, startedAt);
+		attempt.status = PolicyFetchAttemptStatus.PENDING;
+		return attempt;
 	}
 
 	/**
