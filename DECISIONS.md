@@ -369,3 +369,27 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Legacy credential-less rows remain valid until 8B tightens the schema; login in 8B must reject null-hash rows.
 - The transitional open policy endpoints stay open (documented, time-boxed to the ownership-enforcement work in 8B/8C); every newly added endpoint is locked by default.
 
+---
+
+## ADR-018 — JWT Access Authentication + Principal Resolution (Phase 8B)
+
+**Status:** Accepted
+
+**Context:** Phase 8A delivered registration, BCrypt hashing, and an explicit stateless chain, but no login, no token, and no principal — so `/me/*` endpoints (10B-2B) remain unimplementable. Phase 8B must add the minimum real authentication layer (login → short-lived access JWT → per-request validation → UUID principal) without refresh tokens, roles, or any domain change.
+
+**Decision:**
+
+1. JWT library is `com.nimbusds:nimbus-jose-jwt` (10.x, pinned), the sole new dependency. Nimbus is single-artifact, maintained, Java 17 baseline, and JSON-self-contained, so it introduces no Jackson-version clash with Boot 4's Jackson 3. `jjwt` (Jackson 2 alongside Jackson 3) and `spring-boot-starter-oauth2-resource-server` (heavier, OAuth2-named) are rejected.
+2. HS256 access tokens with exactly three claims: `sub` (application User UUID string — never email), `iat`, `exp` (`now + security.jwt.access-token-ttl`, default `PT15M`). No roles, authorities, email, PII, or refresh token. Validation verifies signature, algorithm, expiration, and requires a UUID-parseable `sub`; every failure mode collapses to one `JwtInvalidException` with no reason detail.
+3. Secret comes from `security.jwt.secret` (environment / Git-ignored local config; placeholder only in the committed template). Blank/missing or < 32 UTF-8-byte secrets fail fast at startup. Tests use a committed test-only secret in `src/test/resources/application.properties`, clearly labeled non-production.
+4. Login is `AuthLoginService.login` + `POST /api/v1/auth/login` → `200 {accessToken, tokenType: "Bearer", expiresIn}`. Email is normalized with the existing 8A routine; unknown email, null hash (legacy rows cannot log in), wrong password, and overlong password all yield the identical `InvalidCredentialsException` → HTTP 401 problem+json `"Unauthenticated"` / `"Invalid email or password"`. Unknown-email attempts run a BCrypt `matches` against one static committed dummy hash (not a secret, never per-request generated) to flatten timing; the taken branch is never exposed.
+5. Principal is `AuthenticatedUser(UUID)` (null rejected), built only by `JwtAuthenticationFilter` (a `OncePerRequestFilter` reading `Authorization: Bearer`, registered before `UsernamePasswordAuthenticationFilter`). Filter failures clear the context and continue so the existing entry point emits the single standard 401 — the filter never writes its own. `AuthenticatedUsers.requireUserId(Authentication)` is the web-only UUID extractor (missing/anonymous/wrong principal → `AuthenticationRequiredException` → 401). No `SecurityContextHolder` in services, no static current-user state, no client-supplied identity.
+6. Chain preserves all 8A behavior and additionally permits only `POST /api/v1/auth/login`. No `/me/*` yet.
+7. No V17 migration: `NOT NULL` tightening would break the ~37 credential-less creation sites still used by tests and internal flows, so V1–V16 stay byte-for-byte unchanged and the invariant remains application-enforced. Tightening is re-queued behind internal-creation migration.
+8. Refresh storage/rotation/revocation and `/auth/refresh` belong to Phase 8C.
+
+**Consequences:**
+
+- Any registered user can obtain a 15-minute Bearer token; every protected endpoint resolves the same UUID the explicit-`userId` services already accept, so 10B-2B becomes a thin controller slice with no service changes.
+- Stolen-token exposure is bounded by the short TTL at the cost of re-login until 8C refresh exists; HS256 rotation means redeploy/restart (asymmetric keys deferred unless a multi-service future needs them).
+

@@ -712,7 +712,28 @@ everything else authenticated by default, problem+json 401
 refresh/roles/admin/OAuth2/principal, no notification/scheduler/
 scoring changes; documented in ADR-017).
 
-Phase 8B (access JWT + login + principal) NOT implemented.
+Phase 8B slice implemented and tested successfully
+(Nimbus JOSE+JWT 10.x HS256 access tokens, claims exactly
+`sub` (application User UUID) + `iat` + `exp` with `PT15M`
+default TTL; secret from `security.jwt.secret` with fail-fast
+blank/missing/<32-byte rejection, placeholder only in the
+committed template, test-only secret in
+`src/test/resources/application.properties`;
+`AuthLoginService.login` reuses 8A email normalization, runs a
+static dummy BCrypt hash on unknown emails, rejects null-hash
+legacy rows, and yields one uniform 401 `"Unauthenticated"` /
+`"Invalid email or password"` for every credential failure;
+`POST /api/v1/auth/login` → 200
+`{accessToken,tokenType:"Bearer",expiresIn}` with no credential
+material; `AuthenticatedUser(UUID)` principal built only by the
+Bearer `OncePerRequestFilter` (before
+`UsernamePasswordAuthenticationFilter`), filter failures flowing
+into the existing entry-point 401; `requireUserId` web-only
+helper for future `/me/*` controllers with services unchanged;
+chain otherwise identical to 8A plus login permitAll; no V17
+(V1–V16 untouched), no refresh/roles/admin/OAuth2, no
+notification/scheduler/scoring changes; documented in ADR-018).
+
 Phase 8C (refresh tokens) NOT implemented.
 
 ## Next Action

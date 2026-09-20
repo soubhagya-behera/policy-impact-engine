@@ -17,7 +17,9 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.soubhagya.policyimpactengine.user.AuthenticationRequiredException;
 import com.soubhagya.policyimpactengine.user.DuplicateEmailException;
+import com.soubhagya.policyimpactengine.user.InvalidCredentialsException;
 
 /**
  * Global RFC 7807 error handling. All error responses use
@@ -39,6 +41,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(DuplicateEmailException.class)
 	public ProblemDetail handleConflict(DuplicateEmailException ex) {
 		return problem(HttpStatus.CONFLICT, "Already registered", ex.getMessage());
+	}
+
+	@ExceptionHandler({ InvalidCredentialsException.class, AuthenticationRequiredException.class })
+	public ProblemDetail handleUnauthenticated(RuntimeException ex) {
+		return problem(HttpStatus.UNAUTHORIZED, "Unauthenticated", ex.getMessage());
 	}
 
 	@Override

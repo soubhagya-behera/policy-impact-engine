@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
+import com.soubhagya.policyimpactengine.user.web.JwtAuthenticationFilter;
 
 /**
  * Web-layer tests for the policy registration API. The application service
@@ -41,6 +42,11 @@ class PolicyControllerTest {
 
 	@MockitoBean
 	private PolicyService service;
+
+	// Phase 8B: satisfies SecurityConfig wiring in this slice. Filters
+	// stay disabled, so the mock never executes.
+	@MockitoBean
+	private JwtAuthenticationFilter jwtAuthenticationFilter;
 
 	@Test
 	void registerReturnsCreatedPolicy() throws Exception {

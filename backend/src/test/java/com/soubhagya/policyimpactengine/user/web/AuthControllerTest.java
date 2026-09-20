@@ -19,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.soubhagya.policyimpactengine.user.AuthLoginService;
 import com.soubhagya.policyimpactengine.user.AuthRegistrationService;
 import com.soubhagya.policyimpactengine.user.DuplicateEmailException;
 import com.soubhagya.policyimpactengine.user.RegistrationResult;
@@ -39,6 +40,16 @@ class AuthControllerTest {
 
 	@MockitoBean
 	private AuthRegistrationService service;
+
+	// Phase 8B: AuthController now also depends on the login service;
+	// mocked so the registration slice stays isolated.
+	@MockitoBean
+	private AuthLoginService loginService;
+
+	// Phase 8B: satisfies SecurityConfig wiring in this slice. Filters
+	// stay disabled, so the mock never executes.
+	@MockitoBean
+	private JwtAuthenticationFilter jwtAuthenticationFilter;
 
 	@Test
 	void registerReturnsCreatedResponseWithIdAndEmailOnly() throws Exception {

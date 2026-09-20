@@ -13,6 +13,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -30,8 +31,11 @@ import jakarta.servlet.http.HttpServletResponse;
  * everything else defaults to authenticated so every endpoint added
  * after this slice is locked unless explicitly opened.
  *
- * <p>No JWT mechanism, no principal resolution, and no fake principal
- * in this slice — those belong to Phase 8B. Security failures use
+ * <p>Phase 8B adds Bearer-token authentication before authorization:
+ * {@link JwtAuthenticationFilter} publishes the {@link AuthenticatedUser}
+ * principal; {@code POST /api/v1/auth/login} joins the public endpoints.
+ * No refresh tokens, roles, or {@code /me/*} endpoints yet (see
+ * DECISIONS.md ADR-018). Security failures use
  * {@code application/problem+json} to match the RFC 7807 convention.
  */
 @Configuration
@@ -39,7 +43,8 @@ import jakarta.servlet.http.HttpServletResponse;
 public class SecurityConfig {
 
 	@Bean
-	public SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectMapper objectMapper)
+	public SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectMapper objectMapper,
+			JwtAuthenticationFilter jwtAuthenticationFilter)
 			throws Exception {
 		http
 				.csrf(csrf -> csrf.disable())
@@ -50,8 +55,10 @@ public class SecurityConfig {
 				.authorizeHttpRequests(auth -> auth
 						.dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
 						.requestMatchers("/api/v1/policies/**").permitAll()
 						.anyRequest().authenticated())
+				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
 				.exceptionHandling(ex -> ex
 						.authenticationEntryPoint(authenticationEntryPoint(objectMapper))
 						.accessDeniedHandler(accessDeniedHandler(objectMapper)));
