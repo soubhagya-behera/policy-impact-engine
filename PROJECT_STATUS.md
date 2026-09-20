@@ -268,7 +268,7 @@ Completed (Phase 2O — System-Level Concept Impact Scoring):
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- stale-attempt recovery (Phase 2U.2 — atomic claiming DONE in Phase 2U, retry/backoff DONE in Phase 2U.1)
+- stale-attempt recovery (Phase 2U.2 — DONE: atomic claiming in Phase 2U, retry/backoff in Phase 2U.1, stale recovery in Phase 2U.2)
 - notifications
 
 ## Current Status
@@ -552,7 +552,29 @@ tests incl. 1→2→3 backoff, exhaustion reset, permanent reset, NULL
 legacy reset, MANUAL single-attempt, V11 slot discipline, and the V12
 CHECK).
 
-Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2T = COMPLETE. Phase 2U = COMPLETE. Phase 2U.1 = COMPLETE. Phase 2 overall = IN PROGRESS.
+Phase 2U.2 slice implemented and tested successfully
+(Flyway V13 partial stale-lookup index
+idx_attempt_stale_inflight on policy_fetch_attempt (started_at)
+WHERE status = 'IN_PROGRESS'; V1–V12 untouched, V11 untouched;
+StaleAttemptRecovery sweeper on monitoring.stale-check-interval=PT5M
+with monitoring.stale-timeout=PT30M lease on started_at and
+monitoring.stale-batch-size=100, oldest first, per-row isolation;
+stale IN_PROGRESS rows transition in place to FAILED/TRANSIENT with a
+Stale IN_PROGRESS error message, attempt_number preserved, completed_at
+at recovery time, non-negative duration; conditional recovery UPDATE
+WHERE id AND status AND started_at <= cutoff with affected-rows election
+and no reschedule on a lost race; reschedule through the unchanged
+RetryPolicy.nextCheckAt in a separate short transaction; PENDING rows
+never touched; sweeper never fetches and holds no transaction across
+HTTP; MANUAL/SCHEDULED claim behavior, terminal-then-schedule ordering,
+and 2U.1 retry/backoff formula unchanged; documented in ADR-014;
+deterministic unit tests with a fixed Clock plus Testcontainers
+recovery tests incl. exact-boundary, batch, multi-policy, V11 slot
+release with n → n+1 reclaim, 2U.1 chain/exhaustion, permanent and
+legacy-NULL history, scheduler interaction, dual-worker race with
+exactly-once recovery, and late-worker rejection).
+
+Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2T = COMPLETE. Phase 2U = COMPLETE. Phase 2U.1 = COMPLETE. Phase 2U.2 = COMPLETE. Phase 2 overall = IN PROGRESS.
 
 Phase 2P notes:
 - User introduced without authentication (id + timestamps only; no
@@ -591,10 +613,10 @@ Phase 2S — COMPLETE
 Phase 2T — COMPLETE
 Phase 2U — COMPLETE
 Phase 2U.1 — COMPLETE
+Phase 2U.2 — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- stale-attempt recovery (Phase 2U.2)
 - notifications
 
 Do not mark Phase 2 complete yet.

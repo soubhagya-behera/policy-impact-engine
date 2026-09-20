@@ -263,3 +263,27 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Failure-time (not tick-start) based rescheduling shifts permanent/exhausted advancement by seconds relative to Phase 2T — accepted as more accurate.
 - Phase 2U.2 inherits classified history and a free V11 slot discipline: stale recovery only needs to deal with orphaned non-terminal rows, never with backoff state.
 
+---
+
+## ADR-014 — Stale IN_PROGRESS Recovery (Phase 2U.2)
+
+**Status:** Accepted
+
+**Context:** Phase 2U serializes concurrent triggers and Phase 2U.1 retries classified failures, but a worker that crashes between claiming an attempt and completing it leaves an `IN_PROGRESS` row that holds the policy's V11 in-flight slot forever, blocking every later check of that policy. ARCHITECTURE.md §24 requires stale-attempt recovery as the last piece of the monitoring reliability work, without weakening the V11 claim invariant, without touching retry/backoff semantics, and without external coordination.
+
+**Decision:**
+
+1. The lease timestamp is the existing `started_at` (claim-time stamp, immutable after claim). No new timestamp column. The stale cutoff is `clock.instant() − monitoring.stale-timeout`; a row is stale iff `status = 'IN_PROGRESS' AND started_at <= cutoff` (exactly-at-threshold counts as stale). `PENDING` rows are never recovered: a committed-but-unclaimed `PENDING` row cannot exist because insert and claim share one transaction.
+2. Recovery transitions the existing stale row in place to `FAILED` with `failure_kind = 'TRANSIENT'`, preserving its `attempt_number`. No new row is created, no row is deleted, no new status is introduced. The error message begins with `Stale IN_PROGRESS` so reaped rows stay distinguishable from genuine transient failures while retry math treats them identically. `completed_at` is the recovery time; `duration_ms` is the non-negative whole-observation duration.
+3. The recovery UPDATE is conditional — `WHERE id = :attemptId AND status = 'IN_PROGRESS' AND started_at <= :cutoff` — and the affected-row count is the election: 1 wins and the winner reschedules the policy; 0 loses (concurrent completion or concurrent recovery) and does nothing further, especially no `next_check_at` write. No Java synchronization is used; multi-instance safety comes from the database predicate, exactly as the Phase 2U claim.
+4. The reschedule reuses the unchanged `RetryPolicy.nextCheckAt(completedAt, TRANSIENT, attemptNumber)` in a separate short transaction (history first, schedule second — the Phase 2U.1 failure-path order). The next check then runs as an ordinary observation through the single shared claim path with attempt number one past the reaped row.
+5. Flyway V13 adds exactly one object, the partial index `idx_attempt_stale_inflight ON policy_fetch_attempt (started_at ASC) WHERE (status = 'IN_PROGRESS')`, for oldest-first stale lookup. V1–V12 and the V11 index are untouched.
+6. Recovery runs as a separate scheduled sweep (`monitoring.stale-check-interval=PT5M`, `monitoring.stale-batch-size=100`, oldest first, per-row failure isolation), not inside the 24-hour due tick. The sweeper never fetches and never holds a transaction across HTTP. Defaults: `monitoring.stale-timeout=PT30M` — orders of magnitude above legitimate observation latency (bounded HTTP timeouts plus local pipeline stages) and well below the check interval.
+7. A late-finishing original worker whose row was already reaped is rejected by the existing single-terminal-transition guard; the terminal transition is deliberately not redesigned in this phase, and the worker performs no second reschedule because the terminal write precedes scheduling in the observation flow.
+
+**Consequences:**
+
+- Crashed policies self-heal within minutes (lease expiry plus one sweep period) instead of stalling forever; every recovery is auditable history carrying its retry-chain position.
+- The retry chain neither resets nor over-penalizes: a reaped attempt `n` retries as `n+1` with the backoff for `n`, bounded by `maxAttempts` like any transient chain.
+- The accepted trade-off is lease-inherent: if the original worker is merely slow past the timeout (not crashed), its late result is discarded. The 30-minute default makes this practically impossible for legitimate observations.
+
