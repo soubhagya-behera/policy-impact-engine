@@ -17,8 +17,13 @@ import lombok.Getter;
 /**
  * Phase 2P — minimal user identity (auth-deferred).
  *
- * <p>Immutable except for timestamps: only id+created_at/updated_at.
- * No email/password/role — deferred to authentication phase.
+ * <p>Phase 8A adds the nullable credential transition: {@code email}
+ * (application-normalized trim + lowercase, unique) and
+ * {@code passwordHash} (BCrypt, never a raw password). Both stay NULL
+ * for pre-auth rows so the no-arg JPA constructor and
+ * {@code UserService.createUser()} keep working; registration requires
+ * both. DB-level NOT NULL tightening belongs to Phase 8B.
+ * No roles, status, lockout, or token state (see DECISIONS.md ADR-017).
  */
 @Entity
 @Table(name = "app_user")
@@ -38,7 +43,42 @@ public class User {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	/**
+	 * Phase 8A — login identifier, application-normalized (trim +
+	 * lowercase), unique. NULL during the credential transition for
+	 * pre-auth rows; required on the registration path.
+	 */
+	@Column(name = "email", nullable = true, updatable = false, length = 254)
+	private String email;
+
+	/**
+	 * Phase 8A — BCrypt hash of the password. Never a raw password.
+	 * NULL during the credential transition for pre-auth rows.
+	 * No public setter: written only through
+	 * {@link #assignCredentials(String, String)} on registration.
+	 */
+	@Column(name = "password_hash", nullable = true, length = 255)
+	private String passwordHash;
+
 	public User() {
 		// Required by JPA / creation.
+	}
+
+	/**
+	 * Assigns credentials once, on registration. Email must already be
+	 * normalized (trim + lowercase); the hash must already be BCrypt.
+	 */
+	public void assignCredentials(String normalizedEmail, String passwordHash) {
+		if (normalizedEmail == null || normalizedEmail.isBlank()) {
+			throw new IllegalArgumentException("Email must not be blank");
+		}
+		if (passwordHash == null || passwordHash.isBlank()) {
+			throw new IllegalArgumentException("Password hash must not be blank");
+		}
+		if (this.email != null || this.passwordHash != null) {
+			throw new IllegalStateException("Credentials are already assigned");
+		}
+		this.email = normalizedEmail;
+		this.passwordHash = passwordHash;
 	}
 }

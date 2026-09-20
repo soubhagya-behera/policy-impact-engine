@@ -344,3 +344,28 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Until authentication lands, ownership is assigned by explicit user ID at the service boundary; user-data isolation continues to rest on explicit-`userId` service calls, not on a principal.
 - Phase 10B-2 (authenticated notification REST feed) builds directly on this slice: it adds HTTP delivery of the records created here, without touching the fan-out contract.
 
+---
+
+## ADR-017 — Authentication & Security Foundation (Phase 8A)
+
+**Status:** Accepted
+
+**Context:** Phase 8 requires account registration, BCrypt password hashing, a real stateless `SecurityFilterChain`, JWT access/refresh tokens, and principal-based user-data isolation for future `/me/*` endpoints — but that bundle is too large for one safe slice, and no credential model exists yet (`app_user` holds only `id` + timestamps; ~37 test call sites use `new User()` / `createUser()`). Phase 8A must establish the minimum foundation (credential model + registration + explicit chain) without issuing any token and without breaking existing tests or pipeline behavior.
+
+**Decision:**
+
+1. Email is the single login identifier: `app_user.email VARCHAR(254) NULL` in the Flyway V16 transition, application-normalized (trim + lowercase) on registration, unique via `uq_app_user_email`. No separate username system and no dual keys.
+2. Passwords are hashed with `BCryptPasswordEncoder` (default strength); no custom crypto. Raw passwords are never persisted or logged. Policy: minimum 8 characters, maximum 72 UTF-8 bytes (BCrypt truncates beyond 72, so longer input is rejected, never silently truncated); the byte limit is enforced both by DTO validation and by a service-side guard.
+3. Nullable credential transition in V16 (`email` and `password_hash VARCHAR(255)` both NULL): existing credential-less rows keep working and `createUser()` / the no-arg JPA constructor are unchanged, so current tests and internal flows do not break. Application validation requires both fields on the register path. DB-level `NOT NULL` tightening belongs to Phase 8B (V17).
+4. No roles, status/lockout flags, token/refresh tables, credential tables, OAuth2, or admin system in 8A. Authorization in 8A/8B is "authenticated user"; a role column with exactly one value would be dead weight.
+5. Registration only: `AuthRegistrationService.register(email, rawPassword)` (normalize → duplicate check → BCrypt → persist → safe result of id + email) and `POST /api/v1/auth/register` → `201` with `{id, email}`. No login, no refresh, no `/me/*`. Duplicate email raises `DuplicateEmailException`, mapped to HTTP 409 `application/problem+json` in the existing global handler.
+6. Minimal stateless chain: CSRF disabled, HTTP Basic / form login / logout disabled, stateless sessions; `POST /api/v1/auth/register` and existing `/api/v1/policies/**` permitted (behavior preservation — policy endpoints carry no per-user data today); everything else defaults to authenticated. Custom entry point / access-denied handler emit `application/problem+json` (`401 "Unauthenticated"`, `403 "Forbidden"`) to preserve the RFC 7807 convention.
+7. No JWT library, secret, filter, or principal resolution in 8A and no fake principal. No request-supplied user-ID workaround (`?userId=`, `X-User-Id`, path-variable user IDs are forbidden). Phase 8B introduces access-JWT issuance + validation with `sub` = application User UUID, `POST /api/v1/auth/login`, the JWT filter, and the principal-to-UUID helper that feeds the existing explicit-`userId` service signatures. Phase 8C owns refresh tokens (rotation/revocation), only on demonstrated need.
+8. No new production dependency in 8A (BCrypt ships with the existing `spring-boot-starter-security`).
+
+**Consequences:**
+
+- Account creation becomes a durable, tested, credential-safe record while login and all authenticated reads wait for 8B; 10B-2B (notification REST) waits for 8B's principal.
+- Legacy credential-less rows remain valid until 8B tightens the schema; login in 8B must reject null-hash rows.
+- The transitional open policy endpoints stay open (documented, time-boxed to the ownership-enforcement work in 8B/8C); every newly added endpoint is locked by default.
+

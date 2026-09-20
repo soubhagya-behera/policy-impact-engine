@@ -17,6 +17,8 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.soubhagya.policyimpactengine.user.DuplicateEmailException;
+
 /**
  * Global RFC 7807 error handling. All error responses use
  * {@code application/problem+json}.
@@ -32,6 +34,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(IllegalArgumentException.class)
 	public ProblemDetail handleBadRequest(IllegalArgumentException ex) {
 		return problem(HttpStatus.BAD_REQUEST, "Invalid request", ex.getMessage());
+	}
+
+	@ExceptionHandler(DuplicateEmailException.class)
+	public ProblemDetail handleConflict(DuplicateEmailException ex) {
+		return problem(HttpStatus.CONFLICT, "Already registered", ex.getMessage());
 	}
 
 	@Override

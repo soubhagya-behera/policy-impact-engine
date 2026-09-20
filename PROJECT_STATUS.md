@@ -691,7 +691,29 @@ isolation with healing); documented in ADR-016; ARCHITECTURE.md
 §9/§25/§28 updated.
 
 Phase 10B-2 (authenticated notification REST feed) NOT implemented.
-Phase 8 (authentication & security) NOT implemented.
+Phase 8 (authentication & security) IN PROGRESS — Phase 8A scope (see DECISIONS.md ADR-017):
+
+Phase 8A slice implemented and tested successfully
+(Flyway V16 `app_user.email VARCHAR(254) NULL` +
+`password_hash VARCHAR(255) NULL` + unique email index;
+V1–V15 untouched; `User` gains nullable email/passwordHash with
+no-arg JPA constructor and `createUser()` unchanged;
+`BCryptPasswordEncoder` bean, no custom crypto, no new dependency;
+`AuthRegistrationService.register` normalizes email trim+lowercase,
+rejects duplicates via `DuplicateEmailException` → HTTP 409
+problem+json, enforces 8-char minimum / 72 UTF-8-byte maximum
+(DTO + service-side guard, never silently truncated), BCrypt-hashes
+before persistence, never persists/logs raw passwords;
+`POST /api/v1/auth/register` → 201 `{id,email}` only;
+minimal stateless `SecurityFilterChain` — CSRF/Basic/form/logout
+disabled, register + `/api/v1/policies/**` permitted transitionally,
+everything else authenticated by default, problem+json 401
+"Unauthenticated" / 403 "Forbidden" entry points; no JWT/login/
+refresh/roles/admin/OAuth2/principal, no notification/scheduler/
+scoring changes; documented in ADR-017).
+
+Phase 8B (access JWT + login + principal) NOT implemented.
+Phase 8C (refresh tokens) NOT implemented.
 
 ## Next Action
 

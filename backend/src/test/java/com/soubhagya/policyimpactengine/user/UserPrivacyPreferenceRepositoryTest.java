@@ -138,6 +138,10 @@ class UserPrivacyPreferenceRepositoryTest {
 		Arrays.stream(User.class.getDeclaredFields()).filter(f -> f.isAnnotationPresent(Column.class))
 				.forEach(f -> {
 					if (f.getName().equals("updatedAt")) return;
+					// Phase 8A: passwordHash is the single sanctioned mutable
+					// credential (dedicated change flow in a later slice; no
+					// public setter). Email stays immutable (updatable=false).
+					if (f.getName().equals("passwordHash")) return;
 					assertThat(f.getAnnotation(Column.class).updatable()).as("Column %s", f.getName()).isFalse();
 				});
 	}
