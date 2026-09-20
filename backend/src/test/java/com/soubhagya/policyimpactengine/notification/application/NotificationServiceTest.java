@@ -221,7 +221,8 @@ class NotificationServiceTest {
 				.thenReturn(Optional.of(assessment));
 
 		assertThatThrownBy(() -> service.emitForAssessment(UUID.randomUUID(), assessment.getId()))
-				.isInstanceOf(IllegalArgumentException.class);
+				.isInstanceOf(NotificationNotFoundException.class)
+				.hasMessage("Assessment not found");
 		verify(notificationRepository, never()).saveAndFlush(any());
 	}
 
@@ -231,7 +232,8 @@ class NotificationServiceTest {
 		when(assessmentRepository.findById(any())).thenReturn(Optional.empty());
 
 		assertThatThrownBy(() -> service.emitForAssessment(user.getId(), UUID.randomUUID()))
-				.isInstanceOf(IllegalArgumentException.class);
+				.isInstanceOf(NotificationNotFoundException.class)
+				.hasMessage("Assessment not found");
 		verify(notificationRepository, never()).saveAndFlush(any());
 	}
 
@@ -266,7 +268,8 @@ class NotificationServiceTest {
 				.thenReturn(Optional.of(notification));
 
 		assertThatThrownBy(() -> service.markRead(UUID.randomUUID(), notification.getId()))
-				.isInstanceOf(IllegalArgumentException.class);
+				.isInstanceOf(NotificationNotFoundException.class)
+				.hasMessage("Notification not found");
 		verify(notificationRepository, never()).save(any());
 	}
 

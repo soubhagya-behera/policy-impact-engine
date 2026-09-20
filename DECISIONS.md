@@ -312,3 +312,35 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - The module graph gains one fenced bidirectional touchpoint — recommendation.application → notification.application (emit call) alongside notification.application → recommendation.domain (read-only persisted-row evaluation, no service call, hence no Spring cycle) — documented here instead of worked around with duplicated rule codes or signature changes.
 - Until fan-out lands, notifications emit on explicit per-user flows only; the scheduler-driven path that notifies every subscriber of a policy awaits the ownership model.
 
+---
+
+## ADR-016 — Policy Ownership & Automatic Fan-Out (Phase 10B-1)
+
+**Status:** Accepted
+
+**Context:** Phase 10A emits notifications only on explicit per-user flows (`ImpactAssessmentService` / `RecommendationService` with an explicit `userId`); the scheduler observes policies with no user attached, so nothing fans a `NEW_VERSION` out to whoever cares about the policy. ARCHITECTURE.md §25 anticipated "automatic observation fan-out to subscribers", but no ownership model exists yet: policies carry no owner, and authentication (Phase 8) is still deferred, so there is no principal to fan out to. Phase 10B-1 must close that loop at the service layer without forcing the REST-feed, authentication, transfer-authorization, or subscription-model decisions.
+
+**Decision:**
+
+1. Single-owner FK, not subscriptions: Flyway V15 adds exactly one column, `policy.owner_id UUID NULL REFERENCES app_user(id)`. A policy has exactly one owner. There is no `policy_user`, subscription, or watch table and no many-to-many relationship; policy changes are never broadcast to all users — only the single owner receives the personalized fan-out. V1–V14 are untouched, and no speculative indexes are added.
+2. Nullable owner transition: existing rows keep `NULL` (unowned). An unowned policy keeps being observed normally but stays silent: no assessment, no recommendation, no notification.
+3. Owner assignment semantics: `PolicyService.assignOwner(userId, policyId)` validates that both the policy and the user exist, assigns a null owner, treats the same owner as an idempotent no-op, and rejects a different owner. No transfer authorization is implemented here and no REST endpoint exposes the operation; tightening assignment to authenticated ownership belongs to a future phase (with Phase 8 authentication).
+4. Narrow dependency: assignment reads the persisted user through a fenced `policy.application → user.domain` edge (`PolicyService` → `UserRepository`). This mirrors the Phase 2S precedent (ADR-010) of a narrow, one-directional, documented exception to the module direction rule.
+5. Scheduler fan-out placement: the scheduler captures the existing observation result and, after the observation's own success/terminal handling, calls the new `NotificationFanOutService`. `PolicyObservationService` itself is not modified, and the observation result and attempt lifecycle are never altered by fan-out.
+6. Outcome rule: fan-out proceeds only when the outcome is `NEW_VERSION`, the policy is `ACTIVE`, and `owner_id` is non-null. `FIRST_VERSION`, `UNCHANGED`, failures, skipped/claim collisions, inactive policies, and unowned policies return silently.
+7. Version resolution reuses the existing repository query `findByPolicy_IdAndVersionNumber(policyId, versionNumber)`; `PolicyObservationResult` is not modified to carry the version ID.
+8. Fan-out flow reuses the existing services without duplicating their rules: `ImpactAssessmentService.getOrCreateAssessment(ownerId, newVersionId)` → `RecommendationService.getOrCreateRecommendations(ownerId, newVersionId)` → the existing Phase 10A notification emission hook. No impact scoring, recommendation-rule, or notification-creation logic is duplicated.
+9. Transactions stay short and separate: assessment TX, then recommendation TX (which in turn runs the notification TX). No encompassing fan-out transaction exists, and no HTTP is involved.
+10. Idempotency and concurrency come from the existing uniqueness guards — `UNIQUE(user_id, new_version_id)` on the assessment, the Phase 2R recommendation uniqueness, and `UNIQUE(assessment_id)` on the notification — serialized upstream by the V11 observation claim. No Java synchronization and no new infrastructure (no Redis/Kafka/RabbitMQ/ShedLock/advisory locks). Repeated fan-out for the same version converges to the existing records.
+11. Failure isolation: fan-out runs after the observation has succeeded. A fan-out failure changes nothing about the observation — no `PolicyFetchAttempt` change, no `next_check_at` change, no `FAILED` marking, no observation retry, no V11/V12/V13 change — and its exception is isolated per policy so the tick continues with the remaining due policies.
+12. Accepted healable gap: when fan-out fails, the observation stays successful while its personalized fan-out is missing. The gap heals because every step is get-or-create: a repeated fan-out for the same version (or the next version's fan-out) converges to the missing records idempotently.
+13. Exception narrowing: `NotificationNotFoundException extends NoSuchElementException` replaces the `IllegalArgumentException` previously thrown for missing/foreign assessments and notifications (messages unchanged), so those cases map to HTTP 404 when the REST feed lands. No other `NotificationService` behavior changes.
+14. Explicitly out of scope (Phase 10B-2 and Phase 8): REST notification endpoints, JWT/authentication/`SecurityFilterChain`, `CurrentUser`/`SecurityContext`/request-supplied user IDs (the owner ID comes from persisted `Policy.owner_id`), policy transfer/admin functionality, subscriptions/watch tables, audit, email, AI, and observability.
+
+**Consequences:**
+
+- Owned policies notify their owner automatically on every scheduled `NEW_VERSION`; unowned policies observe silently until an owner is assigned.
+- The fan-out path adds no new tables, no new dependencies, no scheduler cadence change, and no retry/backoff/stale-recovery change; due selection, ordering, one-observation-per-policy-per-tick, the next-check move-guard, claim-skip, and failure isolation are preserved.
+- Until authentication lands, ownership is assigned by explicit user ID at the service boundary; user-data isolation continues to rest on explicit-`userId` service calls, not on a principal.
+- Phase 10B-2 (authenticated notification REST feed) builds directly on this slice: it adds HTTP delivery of the records created here, without touching the fan-out contract.
+

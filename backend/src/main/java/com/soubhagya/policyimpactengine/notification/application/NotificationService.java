@@ -124,13 +124,13 @@ public class NotificationService {
 		Notification current = notificationRepository.findById(notificationId)
 				.filter(notification -> notification.getAssessment().getUser().getId()
 						.equals(userId))
-				.orElseThrow(() -> new IllegalArgumentException("Notification not found"));
+				.orElseThrow(() -> new NotificationNotFoundException("Notification not found"));
 		if (current.getReadAt() != null) {
 			return current;
 		}
 		return writeTransaction.execute(status -> {
 			Notification row = notificationRepository.findById(notificationId)
-					.orElseThrow(() -> new IllegalArgumentException("Notification not found"));
+					.orElseThrow(() -> new NotificationNotFoundException("Notification not found"));
 			row.markRead(clock.instant());
 			return notificationRepository.save(row);
 		});
@@ -164,6 +164,6 @@ public class NotificationService {
 	private ImpactAssessment ownedAssessment(UUID userId, UUID assessmentId) {
 		return assessmentRepository.findById(assessmentId)
 				.filter(assessment -> assessment.getUser().getId().equals(userId))
-				.orElseThrow(() -> new IllegalArgumentException("Assessment not found"));
+				.orElseThrow(() -> new NotificationNotFoundException("Assessment not found"));
 	}
 }

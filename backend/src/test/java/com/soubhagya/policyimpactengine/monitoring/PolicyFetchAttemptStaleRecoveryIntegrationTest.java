@@ -2,6 +2,7 @@ package com.soubhagya.policyimpactengine.monitoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -37,6 +38,7 @@ import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchClaimR
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyObservationScheduler;
 import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.monitoring.application.StaleAttemptRecovery;
+import com.soubhagya.policyimpactengine.notification.application.NotificationFanOutService;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttempt;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptStatus;
@@ -478,7 +480,8 @@ class PolicyFetchAttemptStaleRecoveryIntegrationTest {
 
 	private PolicyObservationScheduler scheduler(Fixture fixture, PolicyFetcher fetcher) {
 		return new PolicyObservationScheduler(policyRepository, orchestrator(fixture, fetcher),
-				transactionManager, fixture.clock(), INTERVAL);
+				mock(NotificationFanOutService.class), transactionManager, fixture.clock(),
+				INTERVAL);
 	}
 
 	private PolicyFetcher permanentFetcher() {

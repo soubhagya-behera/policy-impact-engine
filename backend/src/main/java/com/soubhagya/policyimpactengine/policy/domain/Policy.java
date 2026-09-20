@@ -6,13 +6,18 @@ import java.util.UUID;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import com.soubhagya.policyimpactengine.user.domain.User;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
@@ -52,6 +57,18 @@ public class Policy {
 	 */
 	@Column(name = "next_check_at", nullable = false)
 	private Instant nextCheckAt;
+
+	/**
+	 * Phase 10B-1 — single owner of this policy (nullable transition).
+	 *
+	 * <p>Exactly one owner per policy; NULL means unowned. An unowned
+	 * policy is observed normally but stays silent: no assessment, no
+	 * recommendation, no notification. There is no policy_user,
+	 * subscription, or watch table and no many-to-many relationship.
+	 */
+	@ManyToOne(fetch = FetchType.EAGER, optional = true)
+	@JoinColumn(name = "owner_id", nullable = true)
+	private User owner;
 
 	@CreationTimestamp
 	@Column(nullable = false, updatable = false)

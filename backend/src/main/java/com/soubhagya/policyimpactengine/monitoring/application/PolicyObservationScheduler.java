@@ -14,6 +14,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptTrigger;
+import com.soubhagya.policyimpactengine.notification.application.NotificationFanOutService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyObservationResult;
 import com.soubhagya.policyimpactengine.policy.application.PolicyObservationService;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
@@ -51,6 +53,18 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyStatus;
  * move-guard: it applies the uniform interval only when the observation
  * left {@code next_check_at} at or before this tick's start.
  *
+ * <p>Phase 10B-1 automatic fan-out: after a successful observation the
+ * tick hands the observation result to
+ * {@link NotificationFanOutService}, which notifies the policy's
+ * single owner for an eligible {@code NEW_VERSION} only
+ * ({@code ACTIVE} policy with a non-null owner). Fan-out runs after
+ * the observation's own success/terminal handling, never alters the
+ * observation result or the attempt lifecycle, and its exceptions are
+ * isolated per policy: a fan-out failure leaves the successful
+ * observation (attempt state, {@code next_check_at}, retry/backoff,
+ * stale-recovery behavior) untouched and never aborts the remaining
+ * due policies.
+ *
  * <p>The tick itself holds no database transaction. A single policy's
  * failure (already recorded as its {@code FAILED} attempt by the
  * observation flow) never aborts the remaining due policies.
@@ -60,12 +74,14 @@ public class PolicyObservationScheduler {
 
 	private final PolicyRepository policyRepository;
 	private final PolicyObservationService observationService;
+	private final NotificationFanOutService fanOutService;
 	private final TransactionTemplate writeTransaction;
 	private final Clock clock;
 	private final Duration checkInterval;
 
 	public PolicyObservationScheduler(PolicyRepository policyRepository,
 			PolicyObservationService observationService,
+			NotificationFanOutService fanOutService,
 			PlatformTransactionManager transactionManager,
 			Clock clock,
 			@Value("${monitoring.check-interval:PT24H}") Duration checkInterval) {
@@ -74,6 +90,9 @@ public class PolicyObservationScheduler {
 		}
 		if (observationService == null) {
 			throw new IllegalArgumentException("ObservationService must not be null");
+		}
+		if (fanOutService == null) {
+			throw new IllegalArgumentException("FanOutService must not be null");
 		}
 		if (transactionManager == null) {
 			throw new IllegalArgumentException("Transaction manager must not be null");
@@ -86,6 +105,7 @@ public class PolicyObservationScheduler {
 		}
 		this.policyRepository = policyRepository;
 		this.observationService = observationService;
+		this.fanOutService = fanOutService;
 		this.writeTransaction = new TransactionTemplate(transactionManager);
 		this.clock = clock;
 		this.checkInterval = checkInterval;
@@ -105,7 +125,21 @@ public class PolicyObservationScheduler {
 						PolicyStatus.ACTIVE, tickStart);
 		for (Policy policy : due) {
 			try {
-				observationService.observe(policy.getId(), PolicyFetchAttemptTrigger.SCHEDULED);
+				PolicyObservationResult result = observationService.observe(
+						policy.getId(), PolicyFetchAttemptTrigger.SCHEDULED);
+				try {
+					fanOutService.fanOut(policy.getId(), result);
+				}
+				catch (RuntimeException fanOutFailure) {
+					// Phase 10B-1 failure isolation: the observation
+					// itself already succeeded (its SUCCESS attempt and
+					// terminal handling stand). A fan-out failure must
+					// not change the attempt, reschedule the policy,
+					// mark the observation failed, or abort the tick;
+					// the missing personalized fan-out is a healable
+					// gap recovered by a repeated fan-out for the same
+					// version. Continue with the remaining policies.
+				}
 			}
 			catch (PolicyFetchClaimRejectedException claimedElsewhere) {
 				// Another trigger owns this policy right now: skip it for

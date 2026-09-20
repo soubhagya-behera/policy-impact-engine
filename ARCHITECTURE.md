@@ -162,13 +162,13 @@ The complete domain model is documented here as the target state. **All of the f
 
 ## 9. Entity Relationships and Ownership
 
-Intended relationships (PLANNED):
+Intended relationships (IMPLEMENTED through Phase 10B-1):
 
 - `Policy` 1—N `PolicyVersion` — a policy accumulates versions over time.
 - `PolicyVersion` 1—N `PolicySection` — a version is decomposed into sections.
 - `PolicyChange` references exactly two versions (previous and current) and, for modified or moved changes, the involved sections on both sides.
 - `PolicyChange` 1—N `ChangeConceptMatch`; each match references one `PrivacyConcept`.
-- `User` 1—N `Policy` — users own the policies they register; policy data is isolated per user.
+- `Policy` N—1 `User` (single nullable owner, Phase 10B-1, Flyway V15 `policy.owner_id`): a policy has exactly one owner; NULL means unowned. There is no policy_user, subscription, or watch table and no many-to-many relationship — users do not subscribe to policies and changes are never broadcast; only the single owner receives the personalized fan-out. An unowned policy is observed normally but stays silent (no assessment, recommendation, or notification). Owner assignment (`PolicyService.assignOwner`: null owner assigns, same owner is an idempotent no-op, different owner is rejected) carries no transfer authorization yet; tightening to authenticated ownership awaits Phase 8 (see DECISIONS.md ADR-016).
 - `User` 1—N `UserPrivacyPreference`; each preference references one `PrivacyConcept`. Defaults for unconfigured concepts are resolved in code from concept definitions, never backfilled into rows.
 - `User` 1—N `ImpactAssessment`; each assessment references a user, a policy change set, and records a score breakdown.
 - `ImpactAssessment` 1—N `Recommendation` — recommendations derive from an assessment and remain stable until a new change set arrives.
@@ -356,10 +356,10 @@ The monitoring module (PLANNED, Phase 9) keeps policy data current without user 
 
 Notifications (Phase 10) close the loop between analysis and attention:
 
-- When a policy check produces new meaningful changes and personalized impact, an in-app notification is recorded for the affected user. **Emission is IMPLEMENTED (Phase 10A, service layer only):** exactly one `Notification` per assessment whose persisted recommendations include a rule code other than `REC-NONE-REQUIRED`, ownership derived through the assessment (no duplicated `user_id`), idempotent per assessment via `UNIQUE(assessment_id)`, read/unread state with an explicit mark-read operation, Flyway V14; see DECISIONS.md ADR-015.
+- When a policy check produces new meaningful changes and personalized impact, an in-app notification is recorded for the affected user. **Emission is IMPLEMENTED (Phase 10A, service layer only):** exactly one `Notification` per assessment whose persisted recommendations include a rule code other than `REC-NONE-REQUIRED`, ownership derived through the assessment (no duplicated `user_id`), idempotent per assessment via `UNIQUE(assessment_id)`, read/unread state with an explicit mark-read operation, Flyway V14; see DECISIONS.md ADR-015. **Automatic observation fan-out is IMPLEMENTED (Phase 10B-1, service layer only):** after a successful scheduled observation the scheduler hands the existing observation result to `NotificationFanOutService`, which fans out only when the outcome is `NEW_VERSION`, the policy is `ACTIVE`, and the policy has a non-null owner — resolving the version through the existing `findByPolicy_IdAndVersionNumber` query and reusing `ImpactAssessmentService.getOrCreateAssessment` → `RecommendationService.getOrCreateRecommendations` → the Phase 10A emission hook, each in its own short transaction with no encompassing fan-out transaction. Repeats converge through the existing assessment/recommendation/notification uniqueness guards (no Java synchronization); a fan-out failure leaves the successful observation untouched (no attempt change, no `next_check_at` change, no retry) and is isolated per policy so the tick continues — the accepted healable gap (see DECISIONS.md ADR-016). Unowned policies observe normally but stay silent.
 - A notification carries references to the assessment and change set so the client can navigate directly to the details.
 - The feed supports read/unread state with an explicit "mark read" action; it is a record, not a message queue — no external broker is involved. **The REST feed endpoints remain PLANNED (Phase 10B, with Phase 8 authentication).**
-- Emission is part of the single pipeline completion path; both manual and scheduled checks produce notifications identically. **Automatic observation fan-out to subscribers remains PLANNED (Phase 10B — it needs the policy ownership model); Phase 10A emits on explicit per-user flows.**
+- Emission is part of the single pipeline completion path; both manual and scheduled checks produce notifications identically. **Automatic observation fan-out to the single policy owner is IMPLEMENTED (Phase 10B-1, service layer only); the REST feed endpoints remain PLANNED (Phase 10B-2, with Phase 8 authentication).**
 
 ## 26. Audit Events
 
@@ -419,8 +419,8 @@ All REST APIs are versioned under **`/api/v1`**. The following surface is PLANNE
 | POST | `/api/v1/auth/register` | Account registration | 8 |
 | POST | `/api/v1/auth/login` | Authentication (access + refresh token) | 8 |
 | POST | `/api/v1/auth/refresh` | Refresh the access token | 8 |
-| GET | `/api/v1/me/notifications` | In-app notification feed | 10 |
-| POST | `/api/v1/me/notifications/{id}/read` | Mark a notification read | 10 |
+| GET | `/api/v1/me/notifications` | In-app notification feed | 10B-2 |
+| POST | `/api/v1/me/notifications/{id}/read` | Mark a notification read | 10B-2 |
 | GET | `/api/v1/me/audit-events` | The user's audit trail | 11 |
 
 API conventions:
@@ -493,7 +493,9 @@ Implementation proceeds through the approved roadmap below. Phases are **vertica
 | 7 | **Recommendations** | Recommendation; ordered deterministic rule engine; deduplication and idempotency; golden recommendation tests. |
 | 8 | **Authentication & Security** | User entity; real security filter chain; JWT access/refresh; BCrypt; authorization; strict user-data isolation tests. *New dependency: JWT library (chosen in-phase).* |
 | 9 | **Scheduled Monitoring** | PolicyFetchAttempt; scheduler; atomic work claiming; concurrent-fetch prevention per policy; retry with exponential backoff and jitter; automatic checks through the one pipeline. |
-| 10 | **Notifications** | Notification entity; in-app feed with read/unread; emission at pipeline completion; tests. |
+| 10 | **Notifications** | Notification entity; in-app feed with read/unread; emission at pipeline completion (10A, service layer) and automatic single-owner fan-out from scheduled observations (10B-1, service layer); authenticated REST feed deferred to 10B-2; tests. |
+| 10B-1 | **Policy Ownership & Automatic Fan-Out (service layer)** | **Status: IMPLEMENTED.** Single nullable `policy.owner_id` FK (Flyway V15); `PolicyService.assignOwner` (assign / idempotent same-owner / reject different-owner, no transfer auth, no REST); scheduler hands the successful observation result to `NotificationFanOutService` (NEW_VERSION + ACTIVE + owned only; version via existing `findByPolicy_IdAndVersionNumber`; assessment → recommendation → Phase 10A hook in separate short transactions; uniqueness-backed idempotency, no new infrastructure; per-policy failure isolation with the accepted healable gap); `NotificationNotFoundException extends NoSuchElementException` for missing/foreign assessment/notification cases. No REST endpoints, no JWT/auth/filter-chain, no transfer/admin, no subscriptions/watch tables. See DECISIONS.md ADR-016. |
+| 10B-2 | **Authenticated Notification REST Feed** | **Status: PLANNED.** HTTP delivery (`GET /api/v1/me/notifications`, `POST /api/v1/me/notifications/{id}/read`) of the records created in 10A/10B-1, with Phase 8 authentication. Not implemented. |
 | 11 | **Audit** | AuditEvent; append-only immutable history; user-visible trail; tests. |
 | 12 | **Optional Local AI** | Ollama integration for natural-language explanations only; advisory layer; deterministic engine remains authoritative (ADR-006). Skipped unless explicitly requested. |
 | 13 | **Production Hardening** | Rate limiting; observability (Actuator); query indexes via Flyway migrations; Dockerization and deployment decisions. *New dependencies: Actuator; rate-limiting library if needed.* |

@@ -642,6 +642,57 @@ newest-first isolation, and end-to-end emission tests incl. hook emission,
 NONE silence, idempotent re-emit, concurrent exactly-once emission,
 failure-without-rollback with healing, and mark-read/isolation flows).
 
+Phase 10B-1 slice implemented and tested successfully
+(Phase 10B-1 = ownership + automatic service-layer fan-out;
+Phase 10B-2 = authenticated notification REST feed, NOT implemented):
+- Flyway V15 policy.owner_id (single nullable owner FK, no
+subscription/watch table, no many-to-many; V1–V14 untouched, no
+speculative indexes)
+- Policy.owner (EAGER ManyToOne, nullable transition) + PolicyService
+assignOwner(userId, policyId) via the narrow fenced
+policy.application → user.domain edge (ADR-016): unknown policy/user
+rejected, null owner assigned, same owner idempotent no-op,
+different owner rejected; no transfer authorization, no REST endpoint
+- NotificationFanOutService (service layer only): fans out only when
+outcome == NEW_VERSION, policy == ACTIVE, owner_id != null
+(FIRST_VERSION/UNCHANGED/FAILED/skipped/inactive/unowned return
+silently); version UUID derived through the existing
+findByPolicy_IdAndVersionNumber query (PolicyObservationResult
+unchanged); eligible flow reuses ImpactAssessmentService
+getOrCreateAssessment → RecommendationService
+getOrCreateRecommendations → Phase 10A emission hook with no
+duplicated scoring/rules/creation logic and no encompassing
+transaction (assessment TX → recommendation TX → notification TX)
+- Idempotency/concurrency through the existing uniqueness guards
+(assessment, Phase 2R recommendations, notification) with V11 claim
+serialization upstream; no Java synchronization, no new
+infrastructure; concurrent fan-out converges to one set
+- Scheduler captures the observation result and calls the fan-out
+after success/terminal handling with per-policy exception isolation:
+fan-out failure changes no attempt, no next_check_at, no retry, no
+V11/V12/V13 behavior, and never aborts the tick (accepted healable
+gap, healed by repeat fan-out)
+- NotificationNotFoundException extends NoSuchElementException for
+missing/foreign assessment/notification cases (messages unchanged);
+no other NotificationService behavior change
+- No REST notification controller, no JWT/authentication/
+SecurityFilterChain, no CurrentUser/SecurityContext, no policy
+transfer/admin, no subscription/watch table, no audit/email/AI/
+observability, no new dependency, no Redis/Kafka/RabbitMQ/
+ShedLock/advisory locks; scheduler cadence and retry/backoff/stale
+recovery algorithms unchanged
+- Unit tests (ownership, fan-out trigger/silence/version-derivation,
+scheduler trigger/isolation) + Testcontainers concurrency proof
+(two fan-out calls → one assessment/recommendation set/notification)
++ Testcontainers ownership/fan-out integration (owned NEW_VERSION
+full flow, unowned silence, UNCHANGED silence, NONE_REQUIRED
+silence, idempotency, V11/retry/stale intact, fan-out failure
+isolation with healing); documented in ADR-016; ARCHITECTURE.md
+§9/§25/§28 updated.
+
+Phase 10B-2 (authenticated notification REST feed) NOT implemented.
+Phase 8 (authentication & security) NOT implemented.
+
 ## Next Action
 
 The next implementation task is the next Phase 2 slice (later pipeline

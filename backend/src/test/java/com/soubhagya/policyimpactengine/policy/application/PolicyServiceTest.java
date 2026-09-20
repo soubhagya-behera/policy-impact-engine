@@ -23,12 +23,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
+import com.soubhagya.policyimpactengine.user.domain.UserRepository;
 
 @ExtendWith(MockitoExtension.class)
 class PolicyServiceTest {
 
 	@Mock
 	private PolicyRepository repository;
+
+	@Mock
+	private UserRepository userRepository;
 
 	@InjectMocks
 	private PolicyService service;

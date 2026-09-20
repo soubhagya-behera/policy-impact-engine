@@ -41,6 +41,7 @@ import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatch;
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRepository;
 import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConcept;
 import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConceptRepository;
+import com.soubhagya.policyimpactengine.notification.application.NotificationNotFoundException;
 import com.soubhagya.policyimpactengine.notification.application.NotificationService;
 import com.soubhagya.policyimpactengine.notification.domain.Notification;
 import com.soubhagya.policyimpactengine.notification.domain.NotificationRepository;
@@ -243,9 +244,9 @@ class NotificationEmissionIntegrationTest {
 		// Cross-user access behaves as not-found on every operation.
 		assertThatThrownBy(() -> notificationService.emitForAssessment(other.getId(),
 				crafted.assessment().getId()))
-				.isInstanceOf(IllegalArgumentException.class);
+				.isInstanceOf(NotificationNotFoundException.class);
 		assertThatThrownBy(() -> notificationService.markRead(other.getId(), notification.getId()))
-				.isInstanceOf(IllegalArgumentException.class);
+				.isInstanceOf(NotificationNotFoundException.class);
 		assertThat(notificationService.listNotifications(other.getId())).isEmpty();
 
 		Notification read = notificationService.markRead(crafted.user().getId(),
