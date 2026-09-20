@@ -14,6 +14,7 @@ import com.soubhagya.policyimpactengine.impact.ImpactAssessmentService;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessment;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentBreakdown;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentBreakdownRepository;
+import com.soubhagya.policyimpactengine.notification.application.NotificationService;
 import com.soubhagya.policyimpactengine.recommendation.domain.Recommendation;
 import com.soubhagya.policyimpactengine.recommendation.domain.RecommendationRepository;
 
@@ -44,6 +45,14 @@ import com.soubhagya.policyimpactengine.recommendation.domain.RecommendationRepo
  * <p>The pure engine runs inside the write transaction but performs no I/O;
  * an engine failure or a flush failure rolls the transaction back and leaves
  * the previously committed assessment intact.
+ *
+ * <p>Phase 10A notification edge: after recommendations commit,
+ * {@link NotificationService#emitForAssessment} records the in-app
+ * notification for assessments with actionable impact. The edge is narrow
+ * and one-directional (recommendation → notification; notification never
+ * calls back) and runs in its own short transaction: an emission failure
+ * propagates without rolling back the committed recommendations, and a
+ * later call heals the missing notification idempotently.
  */
 @Service
 public class RecommendationService {
@@ -52,22 +61,25 @@ public class RecommendationService {
 	private final ImpactAssessmentBreakdownRepository breakdownRepository;
 	private final RecommendationRepository recommendationRepository;
 	private final RecommendationEngine recommendationEngine;
+	private final NotificationService notificationService;
 	private final TransactionTemplate writeTransaction;
 
 	public RecommendationService(ImpactAssessmentService assessmentService,
 			ImpactAssessmentBreakdownRepository breakdownRepository,
 			RecommendationRepository recommendationRepository,
 			RecommendationEngine recommendationEngine,
+			NotificationService notificationService,
 			PlatformTransactionManager transactionManager) {
 		if (assessmentService == null || breakdownRepository == null
 				|| recommendationRepository == null || recommendationEngine == null
-				|| transactionManager == null) {
+				|| notificationService == null || transactionManager == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.assessmentService = assessmentService;
 		this.breakdownRepository = breakdownRepository;
 		this.recommendationRepository = recommendationRepository;
 		this.recommendationEngine = recommendationEngine;
+		this.notificationService = notificationService;
 		this.writeTransaction = new TransactionTemplate(transactionManager);
 	}
 
@@ -75,6 +87,13 @@ public class RecommendationService {
 	 * Returns the existing recommendation set for (user, new version), or
 	 * derives and persists it from the user's assessment. A lost-insert race
 	 * re-reads the winner via the partial UNIQUE indexes.
+	 *
+	 * <p>Phase 10A: after the set is resolved (existing, created, or
+	 * re-read), the notification edge emits the in-app notification for
+	 * assessments with actionable impact. Emission runs in its own short
+	 * transaction after this method's work commits, so an emission failure
+	 * propagates with the recommendations already persisted — and a later
+	 * call heals the missing notification idempotently.
 	 */
 	public List<Recommendation> getOrCreateRecommendations(UUID userId, UUID newVersionId) {
 		if (userId == null) {
@@ -84,16 +103,17 @@ public class RecommendationService {
 			throw new IllegalArgumentException("New version id must not be null");
 		}
 		ImpactAssessment assessment = assessmentService.getOrCreateAssessment(userId, newVersionId);
-		List<Recommendation> existing = findRecommendations(assessment.getId());
-		if (!existing.isEmpty()) {
-			return existing;
+		List<Recommendation> recommendations = findRecommendations(assessment.getId());
+		if (recommendations.isEmpty()) {
+			try {
+				recommendations = writeTransaction.execute(status -> insertRecommendations(assessment));
+			}
+			catch (DataIntegrityViolationException duplicate) {
+				recommendations = findRecommendations(assessment.getId());
+			}
 		}
-		try {
-			return writeTransaction.execute(status -> insertRecommendations(assessment));
-		}
-		catch (DataIntegrityViolationException duplicate) {
-			return findRecommendations(assessment.getId());
-		}
+		notificationService.emitForAssessment(userId, assessment.getId());
+		return recommendations;
 	}
 
 	/**

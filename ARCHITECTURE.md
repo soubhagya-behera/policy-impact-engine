@@ -354,12 +354,12 @@ The monitoring module (PLANNED, Phase 9) keeps policy data current without user 
 
 ## 25. Notifications
 
-Notifications (PLANNED, Phase 10) close the loop between analysis and attention:
+Notifications (Phase 10) close the loop between analysis and attention:
 
-- When a policy check produces new meaningful changes and personalized impact, an in-app notification is recorded for the affected user.
+- When a policy check produces new meaningful changes and personalized impact, an in-app notification is recorded for the affected user. **Emission is IMPLEMENTED (Phase 10A, service layer only):** exactly one `Notification` per assessment whose persisted recommendations include a rule code other than `REC-NONE-REQUIRED`, ownership derived through the assessment (no duplicated `user_id`), idempotent per assessment via `UNIQUE(assessment_id)`, read/unread state with an explicit mark-read operation, Flyway V14; see DECISIONS.md ADR-015.
 - A notification carries references to the assessment and change set so the client can navigate directly to the details.
-- The feed supports read/unread state with an explicit "mark read" action; it is a record, not a message queue — no external broker is involved.
-- Emission is part of the single pipeline completion path; both manual and scheduled checks produce notifications identically.
+- The feed supports read/unread state with an explicit "mark read" action; it is a record, not a message queue — no external broker is involved. **The REST feed endpoints remain PLANNED (Phase 10B, with Phase 8 authentication).**
+- Emission is part of the single pipeline completion path; both manual and scheduled checks produce notifications identically. **Automatic observation fan-out to subscribers remains PLANNED (Phase 10B — it needs the policy ownership model); Phase 10A emits on explicit per-user flows.**
 
 ## 26. Audit Events
 

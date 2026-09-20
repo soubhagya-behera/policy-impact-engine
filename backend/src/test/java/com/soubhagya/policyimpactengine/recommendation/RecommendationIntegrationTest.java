@@ -51,6 +51,8 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersion;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyVersionRepository;
 import com.soubhagya.policyimpactengine.policy.fetch.Sha256PolicyContentHasher;
+import com.soubhagya.policyimpactengine.notification.application.NotificationService;
+import com.soubhagya.policyimpactengine.notification.domain.NotificationRepository;
 import com.soubhagya.policyimpactengine.recommendation.domain.Recommendation;
 import com.soubhagya.policyimpactengine.recommendation.domain.RecommendationActionKind;
 import com.soubhagya.policyimpactengine.recommendation.domain.RecommendationRepository;
@@ -87,6 +89,8 @@ class RecommendationIntegrationTest {
 	@Autowired private ImpactAssessmentService impactAssessmentService;
 	@Autowired private RecommendationService recommendationService;
 	@Autowired private RecommendationEngine recommendationEngine;
+	@Autowired private NotificationService notificationService;
+	@Autowired private NotificationRepository notificationRepository;
 	@Autowired private PlatformTransactionManager transactionManager;
 
 	private final Sha256PolicyContentHasher hasher = new Sha256PolicyContentHasher();
@@ -96,6 +100,7 @@ class RecommendationIntegrationTest {
 
 	@BeforeEach
 	void clean() {
+		notificationRepository.deleteAll();
 		recommendationRepository.deleteAll();
 		breakdownRepository.deleteAll();
 		assessmentRepository.deleteAll();
@@ -445,7 +450,7 @@ class RecommendationIntegrationTest {
 		};
 		RecommendationService failing = new RecommendationService(impactAssessmentService,
 				breakdownRepository, recommendationRepository, failingEngine,
-				transactionManager);
+				notificationService, transactionManager);
 
 		assertThatThrownBy(() -> failing
 				.getOrCreateRecommendations(crafted.user().getId(), crafted.v2().getId()))
@@ -479,7 +484,7 @@ class RecommendationIntegrationTest {
 						});
 		RecommendationService failing = new RecommendationService(impactAssessmentService,
 				breakdownRepository, failingRepository, recommendationEngine,
-				transactionManager);
+				notificationService, transactionManager);
 
 		assertThatThrownBy(() -> failing
 				.getOrCreateRecommendations(crafted.user().getId(), crafted.v2().getId()))

@@ -617,9 +617,30 @@ Phase 2U.2 — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- notifications
+- notifications (Phase 10A emission DONE; feed REST + automatic fan-out in Phase 10B)
 
 Do not mark Phase 2 complete yet.
+
+Phase 10A slice implemented and tested successfully
+(Flyway V14 notification table with assessment_id FK, UNIQUE(assessment_id)
+idempotency index and read_at CHECK; V1–V13 untouched; immutable Notification
+entity with the single idempotent markRead transition and EAGER assessment,
+no duplicated user_id (ownership derived through the assessment); NotificationService
+with emitForAssessment/markRead/user-scoped list/unread reads, explicit-userId
+ownership checks with cross-user not-found, separate short transactions and an
+injected Clock; emit rule from persisted recommendation rows — exactly one
+notification iff a rule code other than REC-NONE-REQUIRED exists, NONE-only and
+empty sets stay silent; UNIQUE-backed DataIntegrityViolationException → re-read
+idempotency with no Java synchronization; narrow fenced RecommendationService
+hook after recommendation commit on every resolved path (existing/created/race
+re-read, which heals prior emission failures); emission failure propagates
+without rolling back committed recommendations; no REST endpoints, no scheduler
+or pipeline changes, no auth/filter-chain changes, no new dependencies;
+documented in ADR-015; deterministic unit tests with a fixed Clock plus
+Testcontainers repository tests incl. FK/UNIQUE/CHECK violations and
+newest-first isolation, and end-to-end emission tests incl. hook emission,
+NONE silence, idempotent re-emit, concurrent exactly-once emission,
+failure-without-rollback with healing, and mark-read/isolation flows).
 
 ## Next Action
 

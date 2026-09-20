@@ -287,3 +287,28 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - The retry chain neither resets nor over-penalizes: a reaped attempt `n` retries as `n+1` with the backoff for `n`, bounded by `maxAttempts` like any transient chain.
 - The accepted trade-off is lease-inherent: if the original worker is merely slow past the timeout (not crashed), its late result is discarded. The 30-minute default makes this practically impossible for legitimate observations.
 
+---
+
+## ADR-015 — In-App Notification Emission (Phase 10A)
+
+**Status:** Accepted
+
+**Context:** The deterministic chain Fetch → … → Recommendation is complete, but nothing consumes its output: no user can learn about any result. ARCHITECTURE.md §25 requires in-app notifications recorded when a check produces meaningful changes and personalized impact, as a record (not a message queue) with read/unread state. Per-user assessment and recommendation creation already run through explicit-`userId` services with no authentication in place (Phase 2P precedent), and policies carry no owner, so automatic observation fan-out is not yet expressible. Phase 10A must therefore deliver service-layer emission without forcing the ownership, REST-feed, or authentication decisions.
+
+**Decision:**
+
+1. A notification is created only from an existing `ImpactAssessment`. Flyway V14 creates exactly one table, `notification` (`id` UUID PK, `assessment_id` UUID NOT NULL FK → `impact_assessment(id)`, `created_at` timestamptz NOT NULL, `read_at` timestamptz NULL, `CHECK (read_at IS NULL OR read_at >= created_at)`), plus exactly one object beyond the table: the `uq_notification_assessment` UNIQUE index on `assessment_id`, which is the idempotency guard. V1–V13 are untouched. No speculative indexes.
+2. The emit rule reads the assessment's persisted recommendation rows and creates exactly one notification if and only if at least one row carries a rule code other than `REC-NONE-REQUIRED` (referenced as `FrozenRecommendationRules.RULE_REC_NONE_REQUIRED`, never re-spelled). The rule is stated in persisted rule codes rather than aggregate scores so it stays correct under future rule versions; the closure row by construction never triggers emission. No AI/LLM text generation; notification content is the assessment reference itself.
+3. Ownership derives through `Notification → ImpactAssessment → User`. No `user_id` is stored on the row (V3/V4/V7/V8 no-duplicated-owner-FK convention). Every service method takes an explicit `userId`, resolves ownership through the assessment's user first, and treats cross-user access as not-found (existence-leak avoidance, per §27 convention).
+4. The `Notification` entity is immutable except the single sanctioned `markRead` transition (`read_at` NULL → timestamp, idempotent no-op on repeat, never moved backwards or reset; Clock-stamped, mirrored by the schema CHECK). The assessment relationship is EAGER.
+5. Emission runs in its own short transaction after recommendations commit, invoked through a single narrow fenced edge: `RecommendationService.getOrCreateRecommendations` calls `NotificationService.emitForAssessment(userId, assessmentId)` on every resolved path (existing, created, or race-re-read — which also heals a previously failed emission). Notification never calls back into recommendation application code. The read path (`RecommendationService`) never touches notification state.
+6. Idempotency per assessment follows the 2Q/2R pattern: pre-check re-read plus `UNIQUE(assessment_id)`-backed `DataIntegrityViolationException` → re-read convergence, so repeats and concurrent emits yield the single row. No Java synchronization; no HTTP/network in any notification transaction.
+7. An emission failure propagates without rolling back the already committed assessment/recommendations; a later emit heals the gap idempotently.
+8. The REST feed endpoints, automatic observation fan-out (needs policy ownership), email delivery, and authentication remain explicitly deferred (Phase 10B / Phase 8). No endpoint, filter-chain, scheduler, or pipeline change in Phase 10A.
+
+**Consequences:**
+
+- Actionable impact becomes a durable, user-scoped, auditable record at the per-user completion point, while NONE/LOW outcomes stay silent by rule rather than by threshold duplication.
+- The module graph gains one fenced bidirectional touchpoint — recommendation.application → notification.application (emit call) alongside notification.application → recommendation.domain (read-only persisted-row evaluation, no service call, hence no Spring cycle) — documented here instead of worked around with duplicated rule codes or signature changes.
+- Until fan-out lands, notifications emit on explicit per-user flows only; the scheduler-driven path that notifies every subscriber of a policy awaits the ownership model.
+
