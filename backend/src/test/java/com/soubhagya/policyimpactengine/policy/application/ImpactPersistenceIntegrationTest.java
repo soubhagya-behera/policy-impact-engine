@@ -3,7 +3,10 @@ package com.soubhagya.policyimpactengine.policy.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Random;
+import java.util.Random;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +32,7 @@ import com.soubhagya.policyimpactengine.intelligence.DeterministicConceptMatcher
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRepository;
 import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConceptRepository;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
@@ -69,6 +73,11 @@ class ImpactPersistenceIntegrationTest {
 	private final PolicyContentExtractor extractor = new JsoupPolicyContentExtractor();
 	private final PolicyTextNormalizer normalizer = new DefaultPolicyTextNormalizer();
 	private final PolicyContentHasher hasher = new Sha256PolicyContentHasher();
+
+	private RetryPolicy testRetryPolicy() {
+		return new RetryPolicy(5, Duration.ofMinutes(5), 2.0,
+				Duration.ofHours(6), Duration.ofHours(24), new Random());
+	}
 	private final PolicyDiffEngine diffEngine = new LineBasedPolicyDiffEngine();
 	private final ConceptMatcher conceptMatcher = new DeterministicConceptMatcher();
 	private final com.soubhagya.policyimpactengine.impact.ImpactScoringEngine scoringEngine = new DeterministicImpactScoringEngine();
@@ -187,16 +196,16 @@ class ImpactPersistenceIntegrationTest {
 		String firstHtml = "<html><body><h1>Privacy Policy</h1><p>We collect data.</p></body></html>";
 		String changedHtml = "<html><body><h1>Privacy Policy</h1><p>We collect your precise location data and share it with third-party advertising partners.</p><p>We retain data for 90 days.</p></body></html>";
 		PolicyObservationPersistenceService persistence = persistenceService(diffEngine, conceptMatcher, scoringEngine);
-		PolicyObservationService orch = new PolicyObservationService(policyRepository, new StubFetcher(firstHtml), extractor, normalizer, hasher, persistence, attemptService);
+		PolicyObservationService orch = new PolicyObservationService(policyRepository, new StubFetcher(firstHtml), extractor, normalizer, hasher, persistence, attemptService, testRetryPolicy(), transactionManager);
 		PolicyObservationResult first = orch.observe(policy.getId());
 		assertThat(first.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);
 		assertThat(impactRepository.count()).isZero();
-		PolicyObservationService orch2 = new PolicyObservationService(policyRepository, new StubFetcher(changedHtml), extractor, normalizer, hasher, persistence, attemptService);
+		PolicyObservationService orch2 = new PolicyObservationService(policyRepository, new StubFetcher(changedHtml), extractor, normalizer, hasher, persistence, attemptService, testRetryPolicy(), transactionManager);
 		PolicyObservationResult changed = orch2.observe(policy.getId());
 		assertThat(changed.outcome()).isEqualTo(PolicyVersionObservationOutcome.NEW_VERSION);
 		assertThat(changed.similarity()).isPresent();
 		assertThat(impactRepository.count()).isGreaterThan(0);
-		PolicyObservationService orch3 = new PolicyObservationService(policyRepository, new StubFetcher(changedHtml), extractor, normalizer, hasher, persistence, attemptService);
+		PolicyObservationService orch3 = new PolicyObservationService(policyRepository, new StubFetcher(changedHtml), extractor, normalizer, hasher, persistence, attemptService, testRetryPolicy(), transactionManager);
 		PolicyObservationResult repeat = orch3.observe(policy.getId());
 		assertThat(repeat.outcome()).isEqualTo(PolicyVersionObservationOutcome.UNCHANGED);
 		assertThat(impactRepository.count()).isEqualTo(impactRepository.count());

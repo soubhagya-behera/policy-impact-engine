@@ -2,15 +2,18 @@ package com.soubhagya.policyimpactengine.policy.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.NoSuchElementException;
@@ -24,12 +27,17 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 import com.soubhagya.policyimpactengine.diff.PolicyDiffResult;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchClaimRejectedException;
+import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttempt;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptStatus;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptTrigger;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchFailureKind;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.fetch.FetchResult;
@@ -73,8 +81,21 @@ class PolicyObservationServiceTest {
 	@Mock
 	private PolicyFetchAttemptService attemptService;
 
+	@Mock
+	private RetryPolicy retryPolicy;
+
+	@Mock
+	private PlatformTransactionManager transactionManager;
+
+	@Mock
+	private TransactionStatus transactionStatus;
+
 	@InjectMocks
 	private PolicyObservationService service;
+
+	private void givenScheduleTransaction() {
+		when(transactionManager.getTransaction(any())).thenReturn(transactionStatus);
+	}
 
 	@Test
 	void firstObservationRunsFullPipelineAndReturnsFirstVersion() {
@@ -162,8 +183,10 @@ class PolicyObservationServiceTest {
 		when(fetcher.fetch(policy.getUrl()))
 				.thenThrow(new PolicyFetchException("connection refused"));
 		PolicyFetchAttempt attempt = startedAttempt(policy);
-		when(attemptService.markFailed(any(), isNull(), isNull(), eq("connection refused")))
+		when(attemptService.markFailed(any(), isNull(), isNull(), eq("connection refused"),
+				eq(PolicyFetchFailureKind.PERMANENT)))
 				.thenReturn(attempt);
+		givenScheduleTransaction();
 
 		assertThatThrownBy(() -> service.observe(policy.getId()))
 				.isInstanceOf(PolicyFetchException.class)
@@ -183,7 +206,8 @@ class PolicyObservationServiceTest {
 				.thenThrow(new IllegalStateException("extraction failed"));
 		PolicyFetchAttempt attempt = startedAttempt(policy);
 		when(attemptService.markFailed(any(), eq(200), eq(byteLength("<html>boom</html>")),
-				eq("extraction failed"))).thenReturn(attempt);
+				eq("extraction failed"), eq(PolicyFetchFailureKind.PERMANENT))).thenReturn(attempt);
+		givenScheduleTransaction();
 
 		assertThatThrownBy(() -> service.observe(policy.getId()))
 				.isInstanceOf(IllegalStateException.class)
@@ -205,7 +229,8 @@ class PolicyObservationServiceTest {
 				.thenThrow(new IllegalStateException("normalization failed"));
 		PolicyFetchAttempt attempt = startedAttempt(policy);
 		when(attemptService.markFailed(any(), eq(200), eq(byteLength("<html>x</html>")),
-				eq("normalization failed"))).thenReturn(attempt);
+				eq("normalization failed"), eq(PolicyFetchFailureKind.PERMANENT))).thenReturn(attempt);
+		givenScheduleTransaction();
 
 		assertThatThrownBy(() -> service.observe(policy.getId()))
 				.isInstanceOf(IllegalStateException.class)
@@ -227,7 +252,8 @@ class PolicyObservationServiceTest {
 				.thenThrow(new IllegalStateException("hashing failed"));
 		PolicyFetchAttempt attempt = startedAttempt(policy);
 		when(attemptService.markFailed(any(), eq(200), eq(byteLength("<html>x</html>")),
-				eq("hashing failed"))).thenReturn(attempt);
+				eq("hashing failed"), eq(PolicyFetchFailureKind.PERMANENT))).thenReturn(attempt);
+		givenScheduleTransaction();
 
 		assertThatThrownBy(() -> service.observe(policy.getId()))
 				.isInstanceOf(IllegalStateException.class)
@@ -296,7 +322,8 @@ class PolicyObservationServiceTest {
 				.thenThrow(new IllegalStateException("version store down"));
 		PolicyFetchAttempt attempt = startedAttempt(policy);
 		when(attemptService.markFailed(any(), eq(200), eq(byteLength("<html>persist</html>")),
-				eq("version store down"))).thenReturn(attempt);
+				eq("version store down"), eq(PolicyFetchFailureKind.TRANSIENT))).thenReturn(attempt);
+		givenScheduleTransaction();
 
 		assertThatThrownBy(() -> service.observe(policy.getId()))
 				.isInstanceOf(IllegalStateException.class)
@@ -334,7 +361,95 @@ class PolicyObservationServiceTest {
 		verifyNoInteractions(fetcher, extractor, normalizer, hasher, persistenceService);
 		verify(attemptService, never()).markSucceeded(any(), any(), any());
 		verify(attemptService, never()).markSkippedUnchanged(any(), any(), any());
-		verify(attemptService, never()).markFailed(any(), any(), any(), any());
+		verify(attemptService, never()).markFailed(any(), any(), any(), any(), any());
+	}
+
+	@Test
+	void transientFetchFailureSchedulesBackoffReschedulesAndRethrowsOriginal() {
+		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
+		Instant failedAt = Instant.parse("2026-09-18T10:05:00Z");
+		Instant backoffAt = Instant.parse("2026-09-18T10:07:30Z");
+		PolicyFetchException transientFailure =
+				new PolicyFetchException("connection reset", null, new IOException("reset"), true);
+		when(policyRepository.findById(policy.getId())).thenReturn(Optional.of(policy));
+		when(fetcher.fetch(policy.getUrl())).thenThrow(transientFailure);
+		PolicyFetchAttempt failed = failedAttempt(policy,
+				PolicyFetchFailureKind.TRANSIENT, 1, failedAt);
+		when(attemptService.beginAttempt(eq(policy), eq(PolicyFetchAttemptTrigger.MANUAL)))
+				.thenReturn(failed);
+		when(attemptService.markFailed(any(), isNull(), isNull(), eq("connection reset"),
+				eq(PolicyFetchFailureKind.TRANSIENT))).thenReturn(failed);
+		when(retryPolicy.nextCheckAt(eq(failedAt), eq(PolicyFetchFailureKind.TRANSIENT), eq(1)))
+				.thenReturn(backoffAt);
+		when(policyRepository.save(any(Policy.class)))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		givenScheduleTransaction();
+
+		Throwable thrown = catchThrowable(() -> service.observe(policy.getId()));
+
+		assertThat(thrown).isSameAs(transientFailure);
+		ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
+		verify(policyRepository).save(captor.capture());
+		assertThat(captor.getValue().getNextCheckAt()).isEqualTo(backoffAt);
+		verify(fetcher, times(1)).fetch(policy.getUrl());
+	}
+
+	@Test
+	void permanentFetchFailureCarriesStatusAndSchedulesInterval() {
+		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
+		Instant failedAt = Instant.parse("2026-09-18T10:05:00Z");
+		Instant intervalAt = Instant.parse("2026-09-19T10:05:00Z");
+		PolicyFetchException permanentFailure = new PolicyFetchException("gone", 404, false);
+		when(policyRepository.findById(policy.getId())).thenReturn(Optional.of(policy));
+		when(fetcher.fetch(policy.getUrl())).thenThrow(permanentFailure);
+		PolicyFetchAttempt failed = failedAttempt(policy,
+				PolicyFetchFailureKind.PERMANENT, 1, failedAt);
+		when(attemptService.beginAttempt(eq(policy), eq(PolicyFetchAttemptTrigger.MANUAL)))
+				.thenReturn(failed);
+		when(attemptService.markFailed(any(), eq(404), isNull(), eq("gone"),
+				eq(PolicyFetchFailureKind.PERMANENT))).thenReturn(failed);
+		when(retryPolicy.nextCheckAt(eq(failedAt), eq(PolicyFetchFailureKind.PERMANENT), eq(1)))
+				.thenReturn(intervalAt);
+		when(policyRepository.save(any(Policy.class)))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		givenScheduleTransaction();
+
+		Throwable thrown = catchThrowable(() -> service.observe(policy.getId()));
+
+		assertThat(thrown).isSameAs(permanentFailure);
+		ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
+		verify(policyRepository).save(captor.capture());
+		assertThat(captor.getValue().getNextCheckAt()).isEqualTo(intervalAt);
+		verify(fetcher, times(1)).fetch(policy.getUrl());
+	}
+
+	@Test
+	void persistenceFailureSchedulesAsTransient() {
+		Policy policy = registeredPolicy("Acme Privacy Policy", "https://example.com/privacy");
+		Instant failedAt = Instant.parse("2026-09-18T10:05:00Z");
+		Instant backoffAt = Instant.parse("2026-09-18T10:12:00Z");
+		stubPipeline(policy, "<html>persist</html>", "extracted", "normalized", "hash-persist");
+		when(persistenceService.store(eq(policy.getId()), eq("normalized"), eq("hash-persist")))
+				.thenThrow(new IllegalStateException("version store down"));
+		PolicyFetchAttempt failed = failedAttempt(policy,
+				PolicyFetchFailureKind.TRANSIENT, 2, failedAt);
+		when(attemptService.beginAttempt(eq(policy), eq(PolicyFetchAttemptTrigger.MANUAL)))
+				.thenReturn(failed);
+		when(attemptService.markFailed(any(), eq(200), eq(byteLength("<html>persist</html>")),
+				eq("version store down"), eq(PolicyFetchFailureKind.TRANSIENT))).thenReturn(failed);
+		when(retryPolicy.nextCheckAt(eq(failedAt), eq(PolicyFetchFailureKind.TRANSIENT), eq(2)))
+				.thenReturn(backoffAt);
+		when(policyRepository.save(any(Policy.class)))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+		givenScheduleTransaction();
+
+		assertThatThrownBy(() -> service.observe(policy.getId()))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("version store down");
+
+		ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
+		verify(policyRepository).save(captor.capture());
+		assertThat(captor.getValue().getNextCheckAt()).isEqualTo(backoffAt);
 	}
 
 	@Test
@@ -348,7 +463,9 @@ class PolicyObservationServiceTest {
 		when(hasher.hash("normalized")).thenThrow(new IllegalStateException());
 		PolicyFetchAttempt attempt = startedAttempt(policy);
 		when(attemptService.markFailed(any(), eq(200), eq(byteLength("<html>x</html>")),
-				eq("java.lang.IllegalStateException"))).thenReturn(attempt);
+				eq("java.lang.IllegalStateException"), eq(PolicyFetchFailureKind.PERMANENT)))
+				.thenReturn(attempt);
+		givenScheduleTransaction();
 
 		assertThatThrownBy(() -> service.observe(policy.getId()))
 				.isInstanceOf(IllegalStateException.class);
@@ -374,6 +491,14 @@ class PolicyObservationServiceTest {
 				PolicyFetchAttemptTrigger.MANUAL, 1, Instant.parse("2026-09-18T10:00:00Z"));
 		when(attemptService.beginAttempt(eq(policy), eq(PolicyFetchAttemptTrigger.MANUAL)))
 				.thenReturn(attempt);
+		return attempt;
+	}
+
+	private PolicyFetchAttempt failedAttempt(Policy policy, PolicyFetchFailureKind kind,
+			int attemptNumber, Instant completedAt) {
+		PolicyFetchAttempt attempt = new PolicyFetchAttempt(policy,
+				PolicyFetchAttemptTrigger.MANUAL, attemptNumber, completedAt.minusSeconds(1));
+		attempt.complete(PolicyFetchAttemptStatus.FAILED, null, null, "down", kind, completedAt);
 		return attempt;
 	}
 

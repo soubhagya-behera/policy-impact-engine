@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyObservationScheduler;
+import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttempt;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptStatus;
@@ -139,8 +141,12 @@ class PolicyObservationSchedulerIntegrationTest {
 				.filteredOn(a -> a.getPolicy().getId().equals(healthy.getId()))
 				.extracting(PolicyFetchAttempt::getStatus)
 				.containsExactly(PolicyFetchAttemptStatus.SUCCESS);
-		// Uniform advancement applies to the failed policy as well.
-		assertThat(reload(failing).getNextCheckAt()).isEqualTo(TICK_START.plus(INTERVAL));
+		// Uniform advancement applies to the failed policy as well, but a
+		// failure reschedules from its own failure time (Phase 2U.1), not
+		// from the tick start — the legacy fixture failure is permanent,
+		// so it resumes the regular interval from when it failed, which is
+		// after the frozen tick start.
+		assertThat(reload(failing).getNextCheckAt()).isAfter(TICK_START.plus(INTERVAL));
 		assertThat(reload(healthy).getNextCheckAt()).isEqualTo(TICK_START.plus(INTERVAL));
 		assertThat(versionRepository.count()).isEqualTo(1);
 	}
@@ -187,9 +193,15 @@ class PolicyObservationSchedulerIntegrationTest {
 
 	private PolicyObservationScheduler scheduler(PolicyFetcher fetcher, Clock clock) {
 		PolicyObservationService orchestrator = new PolicyObservationService(policyRepository,
-				fetcher, extractor, normalizer, hasher, persistenceService, attemptService);
+				fetcher, extractor, normalizer, hasher, persistenceService, attemptService,
+				testRetryPolicy(), transactionManager);
 		return new PolicyObservationScheduler(policyRepository, orchestrator, transactionManager,
 				clock, INTERVAL);
+	}
+
+	private RetryPolicy testRetryPolicy() {
+		return new RetryPolicy(5, Duration.ofMinutes(5), 2.0,
+				Duration.ofHours(6), Duration.ofHours(24), new Random());
 	}
 
 	private PolicyFetcher routingFetcher(Map<String, String> pathToHtml) {

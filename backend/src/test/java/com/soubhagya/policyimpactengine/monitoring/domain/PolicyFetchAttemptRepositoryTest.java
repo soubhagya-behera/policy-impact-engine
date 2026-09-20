@@ -82,7 +82,7 @@ class PolicyFetchAttemptRepositoryTest {
 		// Phase 2U: at most one PENDING/IN_PROGRESS attempt may exist per
 		// policy (V11 partial unique index), so history rows after the first
 		// must start from a terminal row.
-		older.complete(PolicyFetchAttemptStatus.SUCCESS, 200, 1L, null,
+		older.complete(PolicyFetchAttemptStatus.SUCCESS, 200, 1L, null, null,
 				Instant.parse("2026-09-18T10:00:01Z"));
 		attemptRepository.saveAndFlush(older);
 		PolicyFetchAttempt newer = attemptRepository.saveAndFlush(
@@ -98,13 +98,14 @@ class PolicyFetchAttemptRepositoryTest {
 		Policy policy = registeredPolicy();
 		PolicyFetchAttempt attempt = attemptRepository.saveAndFlush(
 				new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.MANUAL, 1, Instant.parse("2026-09-18T10:00:00Z")));
-		attempt.complete(PolicyFetchAttemptStatus.SUCCESS, 200, 1024L, null,
+		attempt.complete(PolicyFetchAttemptStatus.SUCCESS, 200, 1024L, null, null,
 				Instant.parse("2026-09-18T10:00:02Z"));
 		attemptRepository.saveAndFlush(attempt);
 
 		PolicyFetchAttempt row = attemptRepository
 				.findByPolicy_IdOrderByStartedAtDesc(policy.getId()).get(0);
 		assertThat(row.getStatus()).isEqualTo(PolicyFetchAttemptStatus.SUCCESS);
+		assertThat(row.getFailureKind()).isNull();
 		assertThat(row.getHttpStatus()).isEqualTo(200);
 		assertThat(row.getBytesFetched()).isEqualTo(1024L);
 		assertThat(row.getDurationMs()).isEqualTo(2000L);
@@ -116,11 +117,11 @@ class PolicyFetchAttemptRepositoryTest {
 		Policy policy = registeredPolicy();
 		PolicyFetchAttempt attempt = new PolicyFetchAttempt(policy,
 				PolicyFetchAttemptTrigger.MANUAL, 1, Instant.parse("2026-09-18T10:00:00Z"));
-		attempt.complete(PolicyFetchAttemptStatus.SUCCESS, 200, 1L, null,
+		attempt.complete(PolicyFetchAttemptStatus.SUCCESS, 200, 1L, null, null,
 				Instant.parse("2026-09-18T10:00:01Z"));
 
 		assertThatThrownBy(() -> attempt.complete(PolicyFetchAttemptStatus.FAILED, 500, 1L,
-				"late", Instant.parse("2026-09-18T10:00:02Z")))
+				"late", PolicyFetchFailureKind.TRANSIENT, Instant.parse("2026-09-18T10:00:02Z")))
 				.isInstanceOf(IllegalStateException.class);
 	}
 
@@ -131,8 +132,60 @@ class PolicyFetchAttemptRepositoryTest {
 				PolicyFetchAttemptTrigger.MANUAL, 1, Instant.parse("2026-09-18T10:00:00Z"));
 
 		assertThatThrownBy(() -> attempt.complete(PolicyFetchAttemptStatus.IN_PROGRESS, null,
-				null, null, Instant.parse("2026-09-18T10:00:01Z")))
+				null, null, null, Instant.parse("2026-09-18T10:00:01Z")))
 				.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void failedTransitionRequiresFailureKind() {
+		Policy policy = registeredPolicy();
+		PolicyFetchAttempt attempt = new PolicyFetchAttempt(policy,
+				PolicyFetchAttemptTrigger.MANUAL, 1, Instant.parse("2026-09-18T10:00:00Z"));
+
+		assertThatThrownBy(() -> attempt.complete(PolicyFetchAttemptStatus.FAILED, 500, 1L,
+				"down", null, Instant.parse("2026-09-18T10:00:01Z")))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("failure kind");
+	}
+
+	@Test
+	void nonFailedTransitionRejectsFailureKind() {
+		Policy policy = registeredPolicy();
+		PolicyFetchAttempt attempt = new PolicyFetchAttempt(policy,
+				PolicyFetchAttemptTrigger.MANUAL, 1, Instant.parse("2026-09-18T10:00:00Z"));
+
+		assertThatThrownBy(() -> attempt.complete(PolicyFetchAttemptStatus.SUCCESS, 200, 1L,
+				null, PolicyFetchFailureKind.TRANSIENT, Instant.parse("2026-09-18T10:00:01Z")))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void failedRowPersistsFailureKind() {
+		Policy policy = registeredPolicy();
+		PolicyFetchAttempt transientFailure = attemptRepository.saveAndFlush(
+				new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.SCHEDULED, 2,
+						Instant.parse("2026-09-18T10:00:00Z")));
+		transientFailure.complete(PolicyFetchAttemptStatus.FAILED, null, null, "reset",
+				PolicyFetchFailureKind.TRANSIENT, Instant.parse("2026-09-18T10:00:01Z"));
+		attemptRepository.saveAndFlush(transientFailure);
+
+		List<PolicyFetchAttempt> rows = attemptRepository
+				.findByPolicy_IdOrderByStartedAtDesc(policy.getId());
+		assertThat(rows).hasSize(1);
+		assertThat(rows.get(0).getStatus()).isEqualTo(PolicyFetchAttemptStatus.FAILED);
+		assertThat(rows.get(0).getFailureKind()).isEqualTo(PolicyFetchFailureKind.TRANSIENT);
+		assertThat(rows.get(0).getAttemptNumber()).isEqualTo(2);
+	}
+
+	@Test
+	void invalidFailureKindRejectedByCheckConstraint() {
+		Policy policy = registeredPolicy();
+		assertThatThrownBy(() -> jdbcTemplate.update(
+				"INSERT INTO policy_fetch_attempt (id, policy_id, trigger, status, attempt_number, "
+						+ "started_at, completed_at, failure_kind) VALUES (?, ?, 'MANUAL', 'FAILED', 1, "
+						+ "now(), now(), 'BOGUS')",
+				UUID.randomUUID(), policy.getId()))
+				.isInstanceOf(DataIntegrityViolationException.class);
 	}
 
 	@Test
@@ -148,16 +201,16 @@ class PolicyFetchAttemptRepositoryTest {
 		assertThatThrownBy(() -> new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.MANUAL, 1, null))
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.MANUAL, 1, started)
-				.complete(null, null, null, null, started))
+				.complete(null, null, null, null, null, started))
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.MANUAL, 1, started)
-				.complete(PolicyFetchAttemptStatus.SUCCESS, 99, null, null, started))
+				.complete(PolicyFetchAttemptStatus.SUCCESS, 99, null, null, null, started))
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.MANUAL, 1, started)
-				.complete(PolicyFetchAttemptStatus.SUCCESS, null, -1L, null, started))
+				.complete(PolicyFetchAttemptStatus.SUCCESS, null, -1L, null, null, started))
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new PolicyFetchAttempt(policy, PolicyFetchAttemptTrigger.MANUAL, 1, started)
-				.complete(PolicyFetchAttemptStatus.SUCCESS, null, null, null, null))
+				.complete(PolicyFetchAttemptStatus.SUCCESS, null, null, null, null, null))
 				.isInstanceOf(IllegalArgumentException.class);
 	}
 
@@ -210,7 +263,7 @@ class PolicyFetchAttemptRepositoryTest {
 		// (single sanctioned terminal transition); everything else is
 		// strictly write-once.
 		List<String> lifecycleColumns = List.of("status", "httpStatus", "bytesFetched",
-				"durationMs", "errorMessage", "completedAt");
+				"durationMs", "errorMessage", "failureKind", "completedAt");
 		Arrays.stream(PolicyFetchAttempt.class.getDeclaredFields())
 				.filter(f -> f.isAnnotationPresent(Column.class))
 				.forEach(f -> {

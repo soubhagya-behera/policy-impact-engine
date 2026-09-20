@@ -118,8 +118,7 @@ class PolicyObservationSchedulerTest {
 	}
 
 	@Test
-	void lostClaimSkipsPolicyForThisCycleButStillAdvancesNextCheck() {
-		Policy claimed = policy("Claimed");
+	void lostClaimSkipsPolicyForThisCycleButStillAdvancesNextCheck() {		Policy claimed = policy("Claimed");
 		Policy healthy = policy("Healthy");
 		when(policyRepository
 				.findByStatusAndNextCheckAtLessThanEqualOrderByNextCheckAtAscIdAsc(
@@ -172,8 +171,44 @@ class PolicyObservationSchedulerTest {
 	}
 
 	@Test
-	void missingPolicyDuringAdvancePropagates() {
-		Policy gone = policy("Gone");
+	void alreadyRescheduledPolicyKeepsItsBackoffNextCheck() {
+		Policy rescheduled = policy("Rescheduled");
+		Instant backoffAt = TICK_START.plus(Duration.ofMinutes(7));
+		rescheduled.setNextCheckAt(backoffAt);
+		when(policyRepository
+				.findByStatusAndNextCheckAtLessThanEqualOrderByNextCheckAtAscIdAsc(
+						PolicyStatus.ACTIVE, TICK_START))
+				.thenReturn(List.of(rescheduled));
+		givenTransaction();
+		when(policyRepository.findById(rescheduled.getId())).thenReturn(Optional.of(rescheduled));
+
+		scheduler.checkDuePolicies();
+
+		verify(observationService).observe(rescheduled.getId(), PolicyFetchAttemptTrigger.SCHEDULED);
+		verify(policyRepository, never()).save(any(Policy.class));
+		assertThat(rescheduled.getNextCheckAt()).isEqualTo(backoffAt);
+	}
+
+	@Test
+	void boundaryNextCheckAtTickStartStillAdvances() {
+		Policy boundary = policy("Boundary");
+		boundary.setNextCheckAt(TICK_START);
+		when(policyRepository
+				.findByStatusAndNextCheckAtLessThanEqualOrderByNextCheckAtAscIdAsc(
+						PolicyStatus.ACTIVE, TICK_START))
+				.thenReturn(List.of(boundary));
+		givenTransaction();
+		when(policyRepository.findById(boundary.getId())).thenReturn(Optional.of(boundary));
+		when(policyRepository.save(any(Policy.class)))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+
+		scheduler.checkDuePolicies();
+
+		assertThat(boundary.getNextCheckAt()).isEqualTo(TICK_START.plus(INTERVAL));
+	}
+
+	@Test
+	void missingPolicyDuringAdvancePropagates() {		Policy gone = policy("Gone");
 		when(policyRepository
 				.findByStatusAndNextCheckAtLessThanEqualOrderByNextCheckAtAscIdAsc(
 						PolicyStatus.ACTIVE, TICK_START))
@@ -218,6 +253,9 @@ class PolicyObservationSchedulerTest {
 	private Policy policy(String name) {
 		Policy policy = new Policy(name, "https://example.com/" + UUID.randomUUID());
 		policy.setId(UUID.randomUUID());
+		// Due before the tick so the uniform advancement applies; tests
+		// for the Phase 2U.1 move-guard override this explicitly.
+		policy.setNextCheckAt(TICK_START.minusSeconds(60));
 		return policy;
 	}
 }

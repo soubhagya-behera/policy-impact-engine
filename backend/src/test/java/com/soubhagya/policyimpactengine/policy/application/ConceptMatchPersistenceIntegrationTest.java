@@ -3,7 +3,10 @@ package com.soubhagya.policyimpactengine.policy.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Random;
+import java.util.Random;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +29,7 @@ import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatch;
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRepository;
 import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConceptRepository;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
@@ -78,6 +82,11 @@ class ConceptMatchPersistenceIntegrationTest {
 	private final PolicyContentExtractor extractor = new JsoupPolicyContentExtractor();
 	private final PolicyTextNormalizer normalizer = new DefaultPolicyTextNormalizer();
 	private final PolicyContentHasher hasher = new Sha256PolicyContentHasher();
+
+	private RetryPolicy testRetryPolicy() {
+		return new RetryPolicy(5, Duration.ofMinutes(5), 2.0,
+				Duration.ofHours(6), Duration.ofHours(24), new Random());
+	}
 	private final PolicyDiffEngine diffEngine = new LineBasedPolicyDiffEngine();
 	private final ConceptMatcher conceptMatcher = new DeterministicConceptMatcher();
 
@@ -169,21 +178,21 @@ class ConceptMatchPersistenceIntegrationTest {
 
 		PolicyObservationPersistenceService persistence = persistenceService(diffEngine, conceptMatcher);
 		PolicyObservationService orchestrator = new PolicyObservationService(policyRepository,
-				new StubFetcher(firstHtml), extractor, normalizer, hasher, persistence, attemptService);
+				new StubFetcher(firstHtml), extractor, normalizer, hasher, persistence, attemptService, testRetryPolicy(), transactionManager);
 
 		PolicyObservationResult first = orchestrator.observe(policy.getId());
 		assertThat(first.outcome()).isEqualTo(PolicyVersionObservationOutcome.FIRST_VERSION);
 		assertThat(matchRepository.count()).isZero();
 
 		StubFetcher secondFetcher = new StubFetcher(firstHtml);
-		PolicyObservationService orch2 = new PolicyObservationService(policyRepository, secondFetcher, extractor, normalizer, hasher, persistence, attemptService);
+		PolicyObservationService orch2 = new PolicyObservationService(policyRepository, secondFetcher, extractor, normalizer, hasher, persistence, attemptService, testRetryPolicy(), transactionManager);
 		// Formatting unchanged check: second observation with same content -> UNCHANGED
 		PolicyObservationResult unchanged = orch2.observe(policy.getId());
 		assertThat(unchanged.outcome()).isEqualTo(PolicyVersionObservationOutcome.UNCHANGED);
 		assertThat(matchRepository.count()).isZero();
 
 		StubFetcher changedFetcher = new StubFetcher(changedHtml);
-		PolicyObservationService orch3 = new PolicyObservationService(policyRepository, changedFetcher, extractor, normalizer, hasher, persistence, attemptService);
+		PolicyObservationService orch3 = new PolicyObservationService(policyRepository, changedFetcher, extractor, normalizer, hasher, persistence, attemptService, testRetryPolicy(), transactionManager);
 		PolicyObservationResult changed = orch3.observe(policy.getId());
 		assertThat(changed.outcome()).isEqualTo(PolicyVersionObservationOutcome.NEW_VERSION);
 		assertThat(changed.similarity()).isPresent();

@@ -2,6 +2,7 @@ package com.soubhagya.policyimpactengine.monitoring.domain;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -27,6 +28,14 @@ public interface PolicyFetchAttemptRepository extends JpaRepository<PolicyFetchA
 	 * Returns the recorded attempts for the given policy, newest first.
 	 */
 	List<PolicyFetchAttempt> findByPolicy_IdOrderByStartedAtDesc(UUID policyId);
+
+	/**
+	 * Returns the newest recorded attempt for the given policy, if any.
+	 * Phase 2U.1 derives the retry chain position from this row: a
+	 * {@code FAILED}/{@code TRANSIENT} row continues the chain, anything
+	 * else (or no row) starts it at 1.
+	 */
+	Optional<PolicyFetchAttempt> findFirstByPolicy_IdOrderByStartedAtDesc(UUID policyId);
 
 	/**
 	 * Phase 2U atomic claim: promotes exactly one {@code PENDING} attempt to

@@ -8,7 +8,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -29,6 +31,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRepository;
 import com.soubhagya.policyimpactengine.impact.domain.ChangeImpactRepository;
@@ -179,7 +182,7 @@ class PolicyFetchAttemptIntegrationTest {
 				.thenThrow(new IllegalStateException("version store down"));
 		PolicyObservationService orchestrator = new PolicyObservationService(policyRepository,
 				htmlFetcher("<html><body><p>Content.</p></body></html>"), extractor, normalizer,
-				hasher, failingPersistence, attemptService);
+				hasher, failingPersistence, attemptService, testRetryPolicy(), transactionManager);
 
 		assertThatThrownBy(() -> orchestrator.observe(policy.getId()))
 				.isInstanceOf(IllegalStateException.class)
@@ -271,7 +274,12 @@ class PolicyFetchAttemptIntegrationTest {
 
 	private PolicyObservationService orchestrator(PolicyFetcher fetcher) {
 		return new PolicyObservationService(policyRepository, fetcher, extractor, normalizer,
-				hasher, persistenceService, attemptService);
+				hasher, persistenceService, attemptService, testRetryPolicy(), transactionManager);
+	}
+
+	private RetryPolicy testRetryPolicy() {
+		return new RetryPolicy(5, Duration.ofMinutes(5), 2.0,
+				Duration.ofHours(6), Duration.ofHours(24), new Random());
 	}
 
 	private PolicyFetcher htmlFetcher(String html) {

@@ -1,6 +1,7 @@
 package com.soubhagya.policyimpactengine.monitoring;
 
 import java.time.Clock;
+import java.util.Random;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,5 +28,17 @@ public class MonitoringConfiguration {
 	@Bean
 	public Clock observationClock() {
 		return Clock.systemUTC();
+	}
+
+	/**
+	 * Phase 2U.1 — jitter source for retry backoff.
+	 *
+	 * <p>Unseeded in production; tests construct the retry policy directly
+	 * with a seeded {@link Random}, so every backoff delay is exactly
+	 * reproducible without wall-clock or randomness dependence.
+	 */
+	@Bean
+	public Random retryJitter() {
+		return new Random();
 	}
 }

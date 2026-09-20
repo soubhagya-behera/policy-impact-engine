@@ -1,19 +1,25 @@
 package com.soubhagya.policyimpactengine.policy.application;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttempt;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptTrigger;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchFailureKind;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.fetch.FetchResult;
 import com.soubhagya.policyimpactengine.policy.fetch.PolicyContentExtractor;
 import com.soubhagya.policyimpactengine.policy.fetch.PolicyContentHasher;
+import com.soubhagya.policyimpactengine.policy.fetch.PolicyFetchException;
 import com.soubhagya.policyimpactengine.policy.fetch.PolicyFetcher;
 import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
 
@@ -53,7 +59,10 @@ import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
  * persistence transaction (version creation plus change persistence, with
  * the pure in-memory diff inside it and no network I/O, followed by the
  * pure SimHash similarity outside the transaction). The terminal attempt
- * update runs in its own short write transaction afterwards. A single
+ * update runs in its own short write transaction afterwards, and a failure
+ * additionally reschedules the policy's next check in a further short
+ * write transaction (Phase 2U.1: backoff for transient failures with
+ * retries remaining, regular interval otherwise). A single
  * transaction spanning lookup → network → parse → hash → persist would
  * hold a database connection across an unbounded external call.
  *
@@ -68,7 +77,16 @@ import com.soubhagya.policyimpactengine.policy.fetch.PolicyTextNormalizer;
  * completes as {@code SKIPPED_UNCHANGED}. Any fetch, extraction,
  * normalization, hashing, or persistence failure completes the attempt as
  * {@code FAILED} — in its own transaction, so a version/change rollback
- * still leaves the {@code FAILED} row behind — and then rethrows the
+ * still leaves the {@code FAILED} row behind — carrying the Phase 2U.1
+ * retry classification ({@code TRANSIENT} for timeouts, connection
+ * failures, HTTP 5xx/429, DNS resolution failures, and persistence or
+ * concurrency failures; {@code PERMANENT} for HTTP 4xx, SSRF policy
+ * rejections, oversized responses, and deterministic pipeline failures).
+ * Every failure then reschedules the policy through
+ * {@code next_check_at} — bounded backoff for a transient failure with
+ * retries remaining, the regular check interval otherwise (permanent
+ * failure or an exhausted chain) — in a further short transaction, and
+ * then rethrows the
  * original exception unchanged. If beginning (claiming) the attempt itself
  * fails, the observation fails fast with no silent unrecorded path and no
  * fetch: in particular a lost claim surfaces
@@ -97,6 +115,8 @@ public class PolicyObservationService {
 	private final PolicyContentHasher hasher;
 	private final PolicyObservationPersistenceService persistenceService;
 	private final PolicyFetchAttemptService attemptService;
+	private final RetryPolicy retryPolicy;
+	private final TransactionTemplate writeTransaction;
 
 	public PolicyObservationService(
 			PolicyRepository policyRepository,
@@ -105,7 +125,9 @@ public class PolicyObservationService {
 			PolicyTextNormalizer normalizer,
 			PolicyContentHasher hasher,
 			PolicyObservationPersistenceService persistenceService,
-			PolicyFetchAttemptService attemptService) {
+			PolicyFetchAttemptService attemptService,
+			RetryPolicy retryPolicy,
+			PlatformTransactionManager transactionManager) {
 		if (policyRepository == null) {
 			throw new IllegalArgumentException("PolicyRepository must not be null");
 		}
@@ -127,6 +149,12 @@ public class PolicyObservationService {
 		if (attemptService == null) {
 			throw new IllegalArgumentException("AttemptService must not be null");
 		}
+		if (retryPolicy == null) {
+			throw new IllegalArgumentException("RetryPolicy must not be null");
+		}
+		if (transactionManager == null) {
+			throw new IllegalArgumentException("Transaction manager must not be null");
+		}
 		this.policyRepository = policyRepository;
 		this.fetcher = fetcher;
 		this.extractor = extractor;
@@ -134,6 +162,8 @@ public class PolicyObservationService {
 		this.hasher = hasher;
 		this.persistenceService = persistenceService;
 		this.attemptService = attemptService;
+		this.retryPolicy = retryPolicy;
+		this.writeTransaction = new TransactionTemplate(transactionManager);
 	}
 
 	/**
@@ -154,6 +184,11 @@ public class PolicyObservationService {
 	 * for the monitoring scheduler). Exactly one fetch → extract →
 	 * normalize → hash → persist pipeline runs in either case; only the
 	 * recorded attempt trigger differs.
+	 *
+	 * <p>Each invocation performs at most one fetch attempt: there is no
+	 * retry loop here. A transient failure is recorded and rescheduled
+	 * through {@code next_check_at}, and the retry happens later as an
+	 * ordinary observation through the same claim path.
 	 *
 	 * @param policyId identifier of an already-registered policy
 	 * @param trigger what triggered this check; must not be null
@@ -179,7 +214,9 @@ public class PolicyObservationService {
 			fetched = fetcher.fetch(policy.getUrl());
 		}
 		catch (RuntimeException fetchFailure) {
-			attemptService.markFailed(attempt.getId(), null, null, messageOf(fetchFailure));
+			PolicyFetchAttempt failed = attemptService.markFailed(attempt.getId(), httpStatusOf(fetchFailure),
+					null, messageOf(fetchFailure), kindOf(fetchFailure));
+			scheduleRetry(policyId, failed);
 			throw fetchFailure;
 		}
 		String extracted;
@@ -191,8 +228,10 @@ public class PolicyObservationService {
 			hash = hasher.hash(normalized);
 		}
 		catch (RuntimeException pipelineFailure) {
-			attemptService.markFailed(attempt.getId(), fetched.statusCode(),
-					byteLength(fetched.body()), messageOf(pipelineFailure));
+			PolicyFetchAttempt failed = attemptService.markFailed(attempt.getId(), fetched.statusCode(),
+					byteLength(fetched.body()), messageOf(pipelineFailure),
+					PolicyFetchFailureKind.PERMANENT);
+			scheduleRetry(policyId, failed);
 			throw pipelineFailure;
 		}
 		PolicyObservationResult result;
@@ -200,8 +239,10 @@ public class PolicyObservationService {
 			result = persistenceService.store(policyId, normalized, hash);
 		}
 		catch (RuntimeException persistenceFailure) {
-			attemptService.markFailed(attempt.getId(), fetched.statusCode(),
-					byteLength(fetched.body()), messageOf(persistenceFailure));
+			PolicyFetchAttempt failed = attemptService.markFailed(attempt.getId(), fetched.statusCode(),
+					byteLength(fetched.body()), messageOf(persistenceFailure),
+					PolicyFetchFailureKind.TRANSIENT);
+			scheduleRetry(policyId, failed);
 			throw persistenceFailure;
 		}
 		if (result.outcome() == PolicyVersionObservationOutcome.UNCHANGED) {
@@ -213,6 +254,50 @@ public class PolicyObservationService {
 					byteLength(fetched.body()));
 		}
 		return result;
+	}
+
+	/**
+	 * Reschedules the policy after a failed observation, in its own short
+	 * transaction: bounded backoff for a transient failure with retries
+	 * remaining, the regular check interval otherwise. History
+	 * ({@code markFailed}) is always recorded first, so if this write
+	 * itself fails the {@code FAILED} row still exists and the scheduler's
+	 * move-guard falls back to interval advancement; that secondary
+	 * failure then propagates instead of the original cause.
+	 */
+	private void scheduleRetry(UUID policyId, PolicyFetchAttempt failed) {
+		Instant nextCheckAt = retryPolicy.nextCheckAt(failed.getCompletedAt(), failed.getFailureKind(),
+				failed.getAttemptNumber());
+		writeTransaction.execute(status -> {
+			Policy policy = policyRepository.findById(policyId)
+					.orElseThrow(() -> new NoSuchElementException("Policy " + policyId + " not found"));
+			policy.setNextCheckAt(nextCheckAt);
+			return policyRepository.save(policy);
+		});
+	}
+
+	/**
+	 * Classifies a fetch failure for retry: transient only when the fetch
+	 * layer explicitly said so; anything else from the fetcher (including
+	 * foreign runtime exceptions) fails fast as permanent.
+	 */
+	private static PolicyFetchFailureKind kindOf(RuntimeException fetchFailure) {
+		if (fetchFailure instanceof PolicyFetchException fetchException
+				&& fetchException.isTransientFailure()) {
+			return PolicyFetchFailureKind.TRANSIENT;
+		}
+		return PolicyFetchFailureKind.PERMANENT;
+	}
+
+	/**
+	 * Carries the HTTP status into the FAILED row when a response was
+	 * received; {@code null} when the fetch never got that far.
+	 */
+	private static Integer httpStatusOf(RuntimeException fetchFailure) {
+		if (fetchFailure instanceof PolicyFetchException fetchException) {
+			return fetchException.getHttpStatus();
+		}
+		return null;
 	}
 
 	/**

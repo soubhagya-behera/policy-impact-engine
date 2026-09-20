@@ -32,9 +32,9 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyStatus;
  * <p>Every completed check — {@code SUCCESS}, {@code SKIPPED_UNCHANGED},
  * or {@code FAILED} — advances that policy's {@code next_check_at} by
  * exactly the configured interval from the tick start. There is no
- * catch-up for long-overdue policies, no backoff, no jitter, no retry,
- * and no stale-attempt reclamation in this phase; those belong to the
- * follow-up retry/stale slices.
+ * catch-up for long-overdue policies and no stale-attempt reclamation
+ * in this phase; stale recovery belongs to Phase 2U.2 (retry and backoff
+ * are Phase 2U.1, implemented in the observation failure path).
  *
  * <p>Phase 2U atomic claiming: every tick entry goes through the single
  * shared {@link PolicyObservationService} claim path, so a scheduled check
@@ -43,6 +43,13 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyStatus;
  * {@link PolicyFetchClaimRejectedException}; the tick skips that policy
  * for this cycle (no fetch, no duplicate work) and still advances its
  * {@code next_check_at} uniformly.
+ *
+ * <p>Phase 2U.1 retry/backoff: a failed observation reschedules its own
+ * policy through {@code next_check_at} (bounded backoff for a transient
+ * failure with retries remaining, the regular interval otherwise), so the
+ * tick must not blindly overwrite it. Advancement below is therefore a
+ * move-guard: it applies the uniform interval only when the observation
+ * left {@code next_check_at} at or before this tick's start.
  *
  * <p>The tick itself holds no database transaction. A single policy's
  * failure (already recorded as its {@code FAILED} attempt by the
@@ -86,7 +93,9 @@ public class PolicyObservationScheduler {
 
 	/**
 	 * Observes every due policy once, advancing each policy's next check
-	 * time by the configured interval from this tick's start.
+	 * time by the configured interval from this tick's start — unless the
+	 * observation already rescheduled it (Phase 2U.1 failure backoff),
+	 * which the move-guard preserves.
 	 */
 	@Scheduled(fixedDelayString = "${monitoring.check-interval:PT24H}")
 	public void checkDuePolicies() {
@@ -101,8 +110,8 @@ public class PolicyObservationScheduler {
 			catch (PolicyFetchClaimRejectedException claimedElsewhere) {
 				// Another trigger owns this policy right now: skip it for
 				// this cycle without fetching. Its next check still
-				// advances uniformly below; retry and stale recovery belong
-				// to Phase 2U.1/2U.2.
+				// advances uniformly below; stale recovery belongs to
+				// Phase 2U.2.
 			}
 			catch (RuntimeException observationFailure) {
 				// The FAILED attempt is already recorded by the observation
@@ -116,6 +125,14 @@ public class PolicyObservationScheduler {
 		writeTransaction.execute(status -> {
 			Policy policy = policyRepository.findById(policyId)
 					.orElseThrow(() -> new NoSuchElementException("Policy " + policyId + " not found"));
+			// Move-guard (Phase 2U.1): a failed observation already
+			// rescheduled this policy (backoff or interval) past this
+			// tick's start — an interleaved MANUAL check may have done the
+			// same — so leave it alone. Otherwise apply the uniform tick
+			// advancement exactly as before.
+			if (policy.getNextCheckAt() != null && policy.getNextCheckAt().isAfter(tickStart)) {
+				return policy;
+			}
 			policy.setNextCheckAt(tickStart.plus(checkInterval));
 			return policyRepository.save(policy);
 		});

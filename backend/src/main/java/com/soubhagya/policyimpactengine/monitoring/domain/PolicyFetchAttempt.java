@@ -31,13 +31,16 @@ import lombok.Getter;
  * the row is created {@code IN_PROGRESS} and transitions exactly once to a
  * terminal status ({@code SUCCESS}, {@code FAILED},
  * {@code SKIPPED_UNCHANGED}). Only {@code status}, {@code httpStatus},
- * {@code bytesFetched}, {@code durationMs}, {@code errorMessage}, and
- * {@code completedAt} are set by that single transition — and the payload
- * fields among them ({@code httpStatus}, {@code bytesFetched}) are
- * write-once in effect because the transition itself is guarded to run
- * exactly once. {@code policy}, {@code trigger}, {@code attemptNumber}, and
- * {@code startedAt} are strictly write-once ({@code updatable = false}).
- * There are no other mutation paths: no setters.
+ * {@code bytesFetched}, {@code durationMs}, {@code errorMessage},
+ * {@code failureKind}, and {@code completedAt} are set by that single
+ * transition — and the payload fields among them ({@code httpStatus},
+ * {@code bytesFetched}) are write-once in effect because the transition
+ * itself is guarded to run exactly once. {@code failureKind} is set only
+ * for {@code FAILED} rows (Phase 2U.1 retry classification); every other
+ * terminal row leaves it {@code null}. {@code policy}, {@code trigger},
+ * {@code attemptNumber}, and {@code startedAt} are strictly write-once
+ * ({@code updatable = false}). There are no other mutation paths: no
+ * setters.
  *
  * <p>Phase 2U atomic claiming uses {@link #pending} plus a conditional claim
  * update; see that factory for the claim-time {@code startedAt} rule.
@@ -76,6 +79,10 @@ public class PolicyFetchAttempt {
 	@Column(name = "error_message", nullable = true, updatable = true, columnDefinition = "TEXT")
 	private String errorMessage;
 
+	@Enumerated(EnumType.STRING)
+	@Column(name = "failure_kind", nullable = true, updatable = true, length = 16)
+	private PolicyFetchFailureKind failureKind;
+
 	@Column(name = "attempt_number", nullable = false, updatable = false)
 	private int attemptNumber;
 
@@ -90,9 +97,10 @@ public class PolicyFetchAttempt {
 	}
 
 	/**
-	 * Starts an in-progress attempt. Every Phase 2S attempt uses
-	 * {@code attemptNumber = 1}; retry numbering belongs to the scheduler
-	 * phase.
+	 * Starts an in-progress attempt. The attempt number carries the Phase
+	 * 2U.1 retry chain position (1 for a fresh check, higher for a retry of
+	 * a consecutive transient failure); the claim service derives it from
+	 * the policy's committed attempt history.
 	 */
 	public PolicyFetchAttempt(Policy policy, PolicyFetchAttemptTrigger trigger, int attemptNumber,
 			Instant startedAt) {
@@ -122,8 +130,9 @@ public class PolicyFetchAttempt {
 	 * {@code PENDING}/{@code IN_PROGRESS} row per policy may exist
 	 * (V11 partial unique index). The claim stamps {@code startedAt} at
 	 * claim time, so the provisional creation timestamp given here is
-	 * replaced when work actually starts. Phase 2U attempts use
-	 * {@code attemptNumber = 1}; retry numbering belongs to Phase 2U.1.
+	 * replaced when work actually starts. The attempt number carries the
+	 * Phase 2U.1 retry chain position; see the claim service for the
+	 * derivation rule.
 	 */
 	public static PolicyFetchAttempt pending(Policy policy, PolicyFetchAttemptTrigger trigger,
 			int attemptNumber, Instant startedAt) {
@@ -137,11 +146,13 @@ public class PolicyFetchAttempt {
 	 * {@code PENDING}/{@code IN_PROGRESS} to {@code SUCCESS},
 	 * {@code FAILED}, or {@code SKIPPED_UNCHANGED}, stamping the completion
 	 * time, the non-negative whole-observation duration, and the fetch
-	 * metadata known at completion. Any second transition — or any
+	 * metadata known at completion. A {@code FAILED} transition must carry
+	 * the Phase 2U.1 retry classification; every other terminal transition
+	 * must leave it {@code null}. Any second transition — or any
 	 * non-terminal target — is rejected.
 	 */
 	public void complete(PolicyFetchAttemptStatus terminal, Integer httpStatus, Long bytesFetched,
-			String errorMessage, Instant completedAt) {
+			String errorMessage, PolicyFetchFailureKind failureKind, Instant completedAt) {
 		if (terminal == null) {
 			throw new IllegalArgumentException("Terminal status must not be null");
 		}
@@ -152,6 +163,12 @@ public class PolicyFetchAttempt {
 		}
 		if (status != PolicyFetchAttemptStatus.PENDING && status != PolicyFetchAttemptStatus.IN_PROGRESS) {
 			throw new IllegalStateException("Attempt is already terminal: " + status);
+		}
+		if (terminal == PolicyFetchAttemptStatus.FAILED && failureKind == null) {
+			throw new IllegalArgumentException("FAILED attempts must carry a failure kind");
+		}
+		if (terminal != PolicyFetchAttemptStatus.FAILED && failureKind != null) {
+			throw new IllegalArgumentException("Only FAILED attempts may carry a failure kind");
 		}
 		if (httpStatus != null && (httpStatus < 100 || httpStatus > 599)) {
 			throw new IllegalArgumentException("HTTP status must be between 100 and 599");
@@ -166,6 +183,7 @@ public class PolicyFetchAttempt {
 		this.httpStatus = httpStatus;
 		this.bytesFetched = bytesFetched;
 		this.errorMessage = errorMessage;
+		this.failureKind = failureKind;
 		this.completedAt = completedAt;
 		this.durationMs = Math.max(0L, Duration.between(startedAt, completedAt).toMillis());
 	}

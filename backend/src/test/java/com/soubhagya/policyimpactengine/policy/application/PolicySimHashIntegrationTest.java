@@ -2,8 +2,10 @@ package com.soubhagya.policyimpactengine.policy.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +27,7 @@ import com.soubhagya.policyimpactengine.diff.SimHashDistance;
 import com.soubhagya.policyimpactengine.diff.SimHashSimilarity;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
+import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
@@ -93,6 +96,11 @@ class PolicySimHashIntegrationTest {
 	private final PolicyTextNormalizer normalizer = new DefaultPolicyTextNormalizer();
 	private final PolicyContentHasher hasher = new Sha256PolicyContentHasher();
 
+	private RetryPolicy testRetryPolicy() {
+		return new RetryPolicy(5, Duration.ofMinutes(5), 2.0,
+				Duration.ofHours(6), Duration.ofHours(24), new Random());
+	}
+
 	@BeforeEach
 	void cleanDatabase() {
 		attemptRepository.deleteAll();
@@ -135,7 +143,7 @@ class PolicySimHashIntegrationTest {
 				transactionManager);
 		StubPolicyFetcher stubFetcher = new StubPolicyFetcher(firstHtml);
 		PolicyObservationService orchestrator = new PolicyObservationService(
-				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService, attemptService);
+				policyRepository, stubFetcher, extractor, normalizer, hasher, persistenceService, attemptService, testRetryPolicy(), transactionManager);
 
 		// Observation 1: FIRST_VERSION no similarity
 		PolicyObservationResult first = orchestrator.observe(policy.getId());

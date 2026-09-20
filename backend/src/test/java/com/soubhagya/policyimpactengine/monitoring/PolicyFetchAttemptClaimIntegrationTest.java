@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -34,10 +35,12 @@ import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRe
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchAttemptService;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchClaimRejectedException;
 import com.soubhagya.policyimpactengine.monitoring.application.PolicyObservationScheduler;
+import com.soubhagya.policyimpactengine.monitoring.application.RetryPolicy;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttempt;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptStatus;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptTrigger;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchFailureKind;
 import com.soubhagya.policyimpactengine.policy.application.PolicyObservationPersistenceService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyObservationResult;
 import com.soubhagya.policyimpactengine.policy.application.PolicyObservationService;
@@ -237,7 +240,8 @@ class PolicyFetchAttemptClaimIntegrationTest {
 		Policy failed = registeredPolicy();
 		PolicyFetchAttempt failing = attemptService.beginAttempt(
 				failed, PolicyFetchAttemptTrigger.SCHEDULED);
-		attemptService.markFailed(failing.getId(), null, null, "connection refused");
+		attemptService.markFailed(failing.getId(), null, null, "connection refused",
+				PolicyFetchFailureKind.TRANSIENT);
 		assertThat(attemptRepository.claimPendingAttempt(failing.getId(),
 				PolicyFetchAttemptStatus.PENDING, PolicyFetchAttemptStatus.IN_PROGRESS, now))
 				.isZero();
@@ -254,7 +258,7 @@ class PolicyFetchAttemptClaimIntegrationTest {
 				.extracting(PolicyFetchAttempt::getStatus)
 				.containsExactly(PolicyFetchAttemptStatus.SUCCESS);
 		assertThatThrownBy(() -> attemptService.markFailed(
-				inProgress.getId(), 200, 1L, "late"))
+				inProgress.getId(), 200, 1L, "late", PolicyFetchFailureKind.TRANSIENT))
 				.isInstanceOf(IllegalStateException.class);
 	}
 
@@ -402,7 +406,12 @@ class PolicyFetchAttemptClaimIntegrationTest {
 
 	private PolicyObservationService orchestrator(PolicyFetcher fetcher) {
 		return new PolicyObservationService(policyRepository, fetcher, extractor, normalizer,
-				hasher, persistenceService, attemptService);
+				hasher, persistenceService, attemptService, testRetryPolicy(), transactionManager);
+	}
+
+	private RetryPolicy testRetryPolicy() {
+		return new RetryPolicy(5, Duration.ofMinutes(5), 2.0,
+				Duration.ofHours(6), Duration.ofHours(24), new Random());
 	}
 
 	private PolicyFetcher countingFetcher(AtomicInteger fetchCount, String html) {

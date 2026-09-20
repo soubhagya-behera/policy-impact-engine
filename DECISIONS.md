@@ -238,3 +238,28 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - A JVM crash between claim and terminal update leaves an `IN_PROGRESS` row that blocks later checks for that policy until Phase 2U.2; this limitation is accepted and documented, not silently worked around.
 - Phase 2U.1 (retry/backoff/jitter) and Phase 2U.2 (stale recovery) build directly on this foundation without touching the tick structure, the pipeline, or the claim path.
 
+---
+
+## ADR-013 — Retry & Bounded Backoff (Phase 2U.1)
+
+**Status:** Accepted
+
+**Context:** Phase 2U serializes concurrent triggers but every failure — a momentary timeout and a permanently dead URL alike — is recorded as `FAILED` and re-checked only at the regular 24-hour cadence, with `attempt_number` pinned at 1. ARCHITECTURE.md §24 requires transient failures to retry on bounded exponential backoff with jitter while permanent failures fail fast, without weakening the V11 claim invariant and without stale-attempt recovery (Phase 2U.2).
+
+**Decision:**
+
+1. Retries are *deferred through `Policy.next_check_at`*, never created immediately as `PENDING`. Holding a `PENDING` row across a backoff window would pin the V11 slot for minutes to hours, blocking all other triggers; waking held rows would need a promoter — stale-recovery-shaped machinery that is out of scope. A transient failure advances `next_check_at` by the backoff delay, and the retry later runs as an ordinary observation through the single shared claim path.
+2. Flyway V12 adds exactly one nullable column, `policy_fetch_attempt.failure_kind VARCHAR(16) CHECK (IN ('TRANSIENT','PERMANENT'))`, set only on `FAILED` rows. Pre-2U.1 `FAILED` rows keep `NULL` and reset the retry chain. V11 and V1–V10 are untouched. A streak counter on `policy` was rejected (second source of truth duplicating history); deriving the streak from trailing-`FAILED` counts with no column was rejected (permanent failures would inflate backoff and blur exhaustion).
+3. Classification rides on the throw site: `PolicyFetchException` gains `httpStatus` (null without a response) and `transientFailure`. Transient: timeouts/connection failures, mid-stream IO failures, interrupts (flag preserved), HTTP 5xx, HTTP 429 (`Retry-After` deliberately ignored), DNS resolution failures, empty DNS answers, and all `persistenceService.store()` failures (infra/race causes dominate there; deterministic-bug poison is bounded by `maxAttempts` and stays observable). Permanent: blank/invalid URLs, SSRF policy rejections, HTTP 4xx and 3xx, oversized responses, extraction/normalization/hashing failures, and any foreign runtime exception from the fetcher. The legacy message-only constructors default to permanent with no status.
+4. `attempt_number` chains at claim time from committed history: one past the latest `FAILED`/`TRANSIENT` row while retries remain, otherwise 1. Every retry is therefore a new row with an incremented number; any fresh check starts at 1.
+5. Backoff is `min(cap, base · multiplier^(n-1))` with equal jitter (`delay/2 + uniform(0, delay/2)`), configured as `monitoring.retry-max-attempts=5`, `monitoring.retry-base-delay=PT5M`, `monitoring.retry-multiplier=2.0`, `monitoring.retry-max-delay=PT6H` (production jitter from a `Random` bean; seeded in tests). Exhausted chains and permanent failures resume `monitoring.check-interval` from the failure time and end the streak.
+6. Each `observe()` invocation performs at most one fetch — no retry loop. MANUAL and SCHEDULED share the failure path identically; the one deliberate MANUAL delta is that a MANUAL failure now also reschedules `next_check_at` (previously MANUAL never touched it), so the scheduler performs the retry. The original exception is always rethrown unchanged.
+7. Transaction order per failed observation: claim TX → no TX across HTTP/pipeline → terminal TX (`markFailed`, history first) → `next_check_at` TX. If the scheduling write fails, the `FAILED` row still exists and the scheduler's move-guard falls back to interval advancement; the secondary failure then propagates.
+8. The scheduler's advancement becomes a move-guard: it writes `tickStart + interval` only when `next_check_at` is still at or before the tick start, preserving backoff (or an interleaved MANUAL reschedule). Success, unchanged, and claim-skip behavior is otherwise identical.
+
+**Consequences:**
+
+- Transient outages self-heal in minutes without operator action, while permanent failures stay cheap and visible; every retry is auditable history, never hidden looping.
+- Failure-time (not tick-start) based rescheduling shifts permanent/exhausted advancement by seconds relative to Phase 2T — accepted as more accurate.
+- Phase 2U.2 inherits classified history and a free V11 slot discipline: stale recovery only needs to deal with orphaned non-terminal rows, never with backoff state.
+

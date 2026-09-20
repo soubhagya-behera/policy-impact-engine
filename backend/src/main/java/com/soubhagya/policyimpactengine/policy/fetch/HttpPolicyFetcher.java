@@ -147,11 +147,12 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 			response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
 		}
 		catch (IOException ex) {
-			throw new PolicyFetchException("Failed to fetch URL: " + url + " — " + ex.getMessage(), ex);
+			throw new PolicyFetchException("Failed to fetch URL: " + url + " — " + ex.getMessage(), null,
+					ex, true);
 		}
 		catch (InterruptedException ex) {
 			Thread.currentThread().interrupt();
-			throw new PolicyFetchException("Fetch interrupted for URL: " + url, ex);
+			throw new PolicyFetchException("Fetch interrupted for URL: " + url, null, ex, true);
 		}
 		catch (IllegalArgumentException ex) {
 			throw new PolicyFetchException("Invalid request for URL: " + url, ex);
@@ -160,8 +161,13 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 		int status = response.statusCode();
 		if (status < 200 || status >= 300) {
 			closeQuietly(response.body());
+			// Phase 2U.1 classification: 5xx and 429 are transient
+			// (bounded backoff); every other non-2xx — including 4xx and
+			// the 3xx never followed here — is permanent (fail fast).
+			boolean transientFailure = (status >= 500 && status <= 599) || status == 429;
 			throw new PolicyFetchException(
-					"Fetch failed for URL: " + url + " with HTTP status " + status);
+					"Fetch failed for URL: " + url + " with HTTP status " + status, status,
+					transientFailure);
 		}
 
 		String contentType = response.headers()
@@ -177,12 +183,13 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 			closeQuietly(response.body());
 			throw new PolicyFetchException(
 					"Response exceeded maximum allowed size: Content-Length " + contentLength
-							+ " bytes exceeds maximum of " + maxResponseBodyBytes + " bytes for URL: " + url);
+							+ " bytes exceeds maximum of " + maxResponseBodyBytes + " bytes for URL: " + url,
+					status, false);
 		}
 
 		// Layer 2: bounded streaming read — enforces the limit for chunked or
 		// length-omitted bodies. Counts raw bytes before UTF-8 decoding.
-		String body = readBoundedBody(response.body(), url);
+		String body = readBoundedBody(response.body(), url, status);
 
 		return new FetchResult(trimmed, status, contentType, body);
 	}
@@ -192,7 +199,7 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 	 * Fails with {@link PolicyFetchException} as soon as the limit is
 	 * exceeded, without allocating the full oversized payload.
 	 */
-	private String readBoundedBody(InputStream bodyStream, String url) {
+	private String readBoundedBody(InputStream bodyStream, String url, int status) {
 		try (InputStream in = bodyStream) {
 			ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 			byte[] chunk = new byte[READ_BUFFER_SIZE];
@@ -203,7 +210,8 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 				if (total > maxResponseBodyBytes) {
 					throw new PolicyFetchException(
 							"Response exceeded maximum allowed size: response body exceeds maximum of "
-									+ maxResponseBodyBytes + " bytes for URL: " + url);
+									+ maxResponseBodyBytes + " bytes for URL: " + url,
+							status, false);
 				}
 				buffer.write(chunk, 0, read);
 			}
@@ -213,7 +221,8 @@ public class HttpPolicyFetcher implements PolicyFetcher {
 			throw ex;
 		}
 		catch (IOException ex) {
-			throw new PolicyFetchException("Failed to fetch URL: " + url + " — " + ex.getMessage(), ex);
+			throw new PolicyFetchException("Failed to fetch URL: " + url + " — " + ex.getMessage(), status,
+					ex, true);
 		}
 	}
 

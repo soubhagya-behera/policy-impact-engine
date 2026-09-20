@@ -268,7 +268,7 @@ Completed (Phase 2O — System-Level Concept Impact Scoring):
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- retry/claiming follow-up (backoff/jitter, stale-attempt handling — atomic claiming itself is DONE in Phase 2U)
+- stale-attempt recovery (Phase 2U.2 — atomic claiming DONE in Phase 2U, retry/backoff DONE in Phase 2U.1)
 - notifications
 
 ## Current Status
@@ -531,7 +531,28 @@ invariant, exactly-once conditional claim, terminal lifecycle with no
 reclaim, independent different-policy claims, and scheduler skip —
 483 tests passing).
 
-Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2T = COMPLETE. Phase 2U = COMPLETE. Phase 2 overall = IN PROGRESS.
+Phase 2U.1 slice implemented and tested successfully
+(Flyway V12 nullable failure_kind on policy_fetch_attempt with
+TRANSIENT/PERMANENT CHECK and no backfill; V1–V11 untouched;
+PolicyFetchException enriched with httpStatus + transientFailure set at
+the throw site per the classification table; RetryPolicy pure component
+with monitoring.retry-max-attempts=5, monitoring.retry-base-delay=PT5M,
+monitoring.retry-multiplier=2.0, monitoring.retry-max-delay=PT6H and
+equal jitter over an injected Random; chained attempt_number derived at
+claim time from the latest FAILED/TRANSIENT row; every failure records
+its kind then reschedules next_check_at — backoff for transient with
+retries remaining, regular interval otherwise — in separate short
+transactions with no TX across HTTP, rethrowing the original exception;
+each observe() performs at most one fetch with MANUAL and SCHEDULED on
+the same path; scheduler advancement is a move-guard preserving
+backoff; no stale recovery (Phase 2U.2), no new dependencies;
+documented in ADR-013; deterministic RetryPolicy/classification/
+failure-path/move-guard unit tests plus Testcontainers retry-chain
+tests incl. 1→2→3 backoff, exhaustion reset, permanent reset, NULL
+legacy reset, MANUAL single-attempt, V11 slot discipline, and the V12
+CHECK).
+
+Phase 2Q = COMPLETE. Phase 2R = COMPLETE. Phase 2S = COMPLETE. Phase 2T = COMPLETE. Phase 2U = COMPLETE. Phase 2U.1 = COMPLETE. Phase 2 overall = IN PROGRESS.
 
 Phase 2P notes:
 - User introduced without authentication (id + timestamps only; no
@@ -569,10 +590,11 @@ Phase 2R — COMPLETE
 Phase 2S — COMPLETE
 Phase 2T — COMPLETE
 Phase 2U — COMPLETE
+Phase 2U.1 — COMPLETE
 
 Phase 2 remains IN PROGRESS. Remaining Phase 2 work stays separate:
 - similarity calibration/near-duplicate policy if actually required
-- retry/backoff/jitter follow-up (Phase 2U.1) and stale-attempt recovery (Phase 2U.2)
+- stale-attempt recovery (Phase 2U.2)
 - notifications
 
 Do not mark Phase 2 complete yet.

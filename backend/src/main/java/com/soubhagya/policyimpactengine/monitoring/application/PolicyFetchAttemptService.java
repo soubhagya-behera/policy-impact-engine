@@ -12,6 +12,7 @@ import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttempt;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptRepository;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptStatus;
 import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchAttemptTrigger;
+import com.soubhagya.policyimpactengine.monitoring.domain.PolicyFetchFailureKind;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 
 /**
@@ -30,8 +31,14 @@ import com.soubhagya.policyimpactengine.policy.domain.Policy;
  * row per policy, so exactly one concurrent trigger wins: the loser's
  * insert fails with a uniqueness violation (translated to
  * {@link PolicyFetchClaimRejectedException}) and it performs no fetch and
- * leaves no second runnable row behind. No retry, backoff, jitter, or
- * stale-attempt recovery happens here; those belong to Phase 2U.1/2U.2.
+ * leaves no second runnable row behind. Backoff scheduling and
+ * stale-attempt recovery do not happen here; those belong to the
+ * observation failure path (Phase 2U.1) and Phase 2U.2 respectively.
+ *
+ * <p>Phase 2U.1 retry chaining: the claimed attempt carries the retry
+ * chain position derived from the policy's committed history — one past
+ * the latest {@code FAILED}/{@code TRANSIENT} row while retries remain,
+ * otherwise 1. Stale-attempt recovery is still absent (Phase 2U.2).
  *
  * <p>{@code bytes_fetched} is an approximation: the UTF-8 byte length of
  * the decoded response body available to the orchestrator, or {@code null}
@@ -45,9 +52,10 @@ public class PolicyFetchAttemptService {
 	private final PolicyFetchAttemptRepository attemptRepository;
 	private final TransactionTemplate writeTransaction;
 	private final Clock clock;
+	private final RetryPolicy retryPolicy;
 
 	public PolicyFetchAttemptService(PolicyFetchAttemptRepository attemptRepository,
-			PlatformTransactionManager transactionManager, Clock clock) {
+			PlatformTransactionManager transactionManager, Clock clock, RetryPolicy retryPolicy) {
 		if (attemptRepository == null) {
 			throw new IllegalArgumentException("Attempt repository must not be null");
 		}
@@ -57,17 +65,27 @@ public class PolicyFetchAttemptService {
 		if (clock == null) {
 			throw new IllegalArgumentException("Clock must not be null");
 		}
+		if (retryPolicy == null) {
+			throw new IllegalArgumentException("Retry policy must not be null");
+		}
 		this.attemptRepository = attemptRepository;
 		this.writeTransaction = new TransactionTemplate(transactionManager);
 		this.clock = clock;
+		this.retryPolicy = retryPolicy;
 	}
 
 	/**
 	 * Claims the policy for one observation: persists a {@code PENDING}
-	 * candidate (Phase 2U attempts use {@code attemptNumber = 1}) and then
-	 * atomically promotes it to {@code IN_PROGRESS} with the conditional
-	 * claim update, stamping the claim time. The creation and the claim run
-	 * in a single short transaction; no HTTP/network I/O happens here.
+	 * candidate and then atomically promotes it to {@code IN_PROGRESS}
+	 * with the conditional claim update, stamping the claim time. The
+	 * creation and the claim run in a single short transaction; no
+	 * HTTP/network I/O happens here.
+	 *
+	 * <p>Phase 2U.1 retry chaining: the candidate carries attempt number
+	 * one past the policy's latest {@code FAILED}/{@code TRANSIENT} row
+	 * while retries remain, otherwise 1 — so each retry of a consecutive
+	 * transient failure is persisted as a new row with an incremented
+	 * number, and any fresh check starts at 1.
 	 *
 	 * <p>When another {@code PENDING} or {@code IN_PROGRESS} attempt already
 	 * owns the policy, the insert collides with the V11 partial unique
@@ -90,8 +108,9 @@ public class PolicyFetchAttemptService {
 		UUID policyId = policy.getId();
 		try {
 			return writeTransaction.execute(status -> {
+				int attemptNumber = nextAttemptNumber(policyId);
 				PolicyFetchAttempt candidate = attemptRepository.saveAndFlush(
-						PolicyFetchAttempt.pending(policy, trigger, 1, clock.instant()));
+						PolicyFetchAttempt.pending(policy, trigger, attemptNumber, clock.instant()));
 				UUID attemptId = candidate.getId();
 				int claimed = attemptRepository.claimPendingAttempt(attemptId,
 						PolicyFetchAttemptStatus.PENDING, PolicyFetchAttemptStatus.IN_PROGRESS,
@@ -113,7 +132,7 @@ public class PolicyFetchAttemptService {
 	 * Records a successful check.
 	 */
 	public PolicyFetchAttempt markSucceeded(UUID attemptId, Integer httpStatus, Long bytesFetched) {
-		return complete(attemptId, PolicyFetchAttemptStatus.SUCCESS, httpStatus, bytesFetched, null);
+		return complete(attemptId, PolicyFetchAttemptStatus.SUCCESS, httpStatus, bytesFetched, null, null);
 	}
 
 	/**
@@ -121,27 +140,48 @@ public class PolicyFetchAttemptService {
 	 * version, so no new version was created.
 	 */
 	public PolicyFetchAttempt markSkippedUnchanged(UUID attemptId, Integer httpStatus, Long bytesFetched) {
-		return complete(attemptId, PolicyFetchAttemptStatus.SKIPPED_UNCHANGED, httpStatus, bytesFetched, null);
+		return complete(attemptId, PolicyFetchAttemptStatus.SKIPPED_UNCHANGED, httpStatus, bytesFetched, null,
+				null);
 	}
 
 	/**
-	 * Records a failed check with its cause.
+	 * Records a failed check with its cause and its Phase 2U.1 retry
+	 * classification.
 	 */
 	public PolicyFetchAttempt markFailed(UUID attemptId, Integer httpStatus, Long bytesFetched,
-			String errorMessage) {
-		return complete(attemptId, PolicyFetchAttemptStatus.FAILED, httpStatus, bytesFetched, errorMessage);
+			String errorMessage, PolicyFetchFailureKind failureKind) {
+		return complete(attemptId, PolicyFetchAttemptStatus.FAILED, httpStatus, bytesFetched, errorMessage,
+				failureKind);
 	}
 
 	private PolicyFetchAttempt complete(UUID attemptId, PolicyFetchAttemptStatus terminal, Integer httpStatus,
-			Long bytesFetched, String errorMessage) {
+			Long bytesFetched, String errorMessage, PolicyFetchFailureKind failureKind) {
 		if (attemptId == null) {
 			throw new IllegalArgumentException("Attempt id must not be null");
 		}
 		return writeTransaction.execute(status -> {
 			PolicyFetchAttempt attempt = attemptRepository.findById(attemptId)
 					.orElseThrow(() -> new IllegalArgumentException("PolicyFetchAttempt not found: " + attemptId));
-			attempt.complete(terminal, httpStatus, bytesFetched, errorMessage, clock.instant());
+			attempt.complete(terminal, httpStatus, bytesFetched, errorMessage, failureKind, clock.instant());
 			return attemptRepository.save(attempt);
 		});
+	}
+
+	/**
+	 * Derives the attempt number for the next claim from the policy's
+	 * committed history: one past the latest {@code FAILED}/
+	 * {@code TRANSIENT} row while that chain still has retries remaining,
+	 * otherwise 1. Rows without a classification (successes, skips,
+	 * permanent failures, and pre-2U.1 history) always reset the chain.
+	 * Must run inside the claim transaction so the number reflects the
+	 * history the new row joins.
+	 */
+	private int nextAttemptNumber(UUID policyId) {
+		return attemptRepository.findFirstByPolicy_IdOrderByStartedAtDesc(policyId)
+				.filter(latest -> latest.getStatus() == PolicyFetchAttemptStatus.FAILED
+						&& latest.getFailureKind() == PolicyFetchFailureKind.TRANSIENT
+						&& retryPolicy.retriesRemaining(latest.getAttemptNumber()))
+				.map(latest -> latest.getAttemptNumber() + 1)
+				.orElse(1);
 	}
 }

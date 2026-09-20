@@ -80,10 +80,13 @@ public class SsrfGuard {
 			addresses = dnsResolver.resolve(host);
 		}
 		catch (UnknownHostException ex) {
-			throw new PolicyFetchException("Failed to resolve host: " + host, ex);
+			// Phase 2U.1 classification: resolution itself failing is
+			// environmental (transient); a resolved-but-blocked address
+			// below stays permanent via the default constructor.
+			throw new PolicyFetchException("Failed to resolve host: " + host, null, ex, true);
 		}
 		if (addresses == null || addresses.length == 0) {
-			throw new PolicyFetchException("No addresses resolved for host: " + host);
+			throw new PolicyFetchException("No addresses resolved for host: " + host, null, null, true);
 		}
 		for (InetAddress address : addresses) {
 			SsrfAddressValidator.validate(address);
