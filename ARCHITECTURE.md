@@ -412,7 +412,7 @@ All REST APIs are versioned under **`/api/v1`**. The following surface is PLANNE
 | GET | `/api/v1/policies/{id}/versions/{versionId}` | Version snapshot content | 3 |
 | GET | `/api/v1/policies/{id}/changes` | Changes for a policy | 4 |
 | GET | `/api/v1/policies/{id}/versions/{a}/diff/{b}` | Diff between two versions | 4 |
-| GET / PUT | `/api/v1/me/privacy-preferences` | Read / bulk-update the privacy profile | 6 |
+| GET / PUT | `/api/v1/me/privacy-preferences` | Read / bulk-update the privacy profile (full concept surface, merge semantics) | 6 (IMPLEMENTED) |
 | GET | `/api/v1/changes/{changeId}/assessment` | Scored assessment with breakdown | 6 |
 | GET | `/api/v1/me/impact-summary` | Pending-impact digest for the user | 6 |
 | GET | `/api/v1/me/recommendations` | Current pending recommendations | 7 |

@@ -800,6 +800,26 @@ slice incl. 401s) + new `PolicyOwnershipIntegrationTest`
 updated for the locked boundary; documented in ARCHITECTURE.md
 §9/§27/§28 and ADR-019.
 
+Privacy preference REST slice implemented and tested successfully
+(see DECISIONS.md ADR-020):
+- `GET /api/v1/me/privacy-preferences` returns the full
+effective surface (every concept, code order; `conceptCode`,
+`label`, `effectiveSensitivity`, `explicit`) via the existing
+resolver; `PUT` accepts `{"preferences":{CODE:0–5}}` with merge
+semantics (upsert present, absent untouched; unknown concept →
+400, range violations → 400, malformed JSON → 400)
+- Identity only from `requireUserId`; per-entry short
+`REQUIRES_NEW` transactions with UNIQUE-backed re-read on
+lost-insert races, no Java synchronization; no migration
+(V6 schema sufficient), no resolver/scoring changes
+- `PrivacyPreferenceControllerTest` (slice: delegation,
+validation, 400s, override rejection) +
+`PrivacyPreferenceApiIntegrationTest` (filters-enabled
+Testcontainers: 401s, full surface, isolation, injection,
+idempotency, merge, persisted preference proven to flow into
+`ImpactAssessmentService` personalized scores); documented in
+ARCHITECTURE.md §28 and ADR-020.
+
 ## Next Action
 
 The next implementation task is the next approved slice

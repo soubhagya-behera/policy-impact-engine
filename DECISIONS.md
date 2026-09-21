@@ -415,3 +415,25 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - The public policy listing/detail contract ends here: unauthenticated callers receive 401 and authenticated callers see only their own rows — a deliberate break of the transitional behavior, covered by updated chain and isolation tests.
 - Transfer authorization remains explicitly out of scope; `assignOwner` still performs no authorization and must not be exposed without a future decision.
 
+---
+
+## ADR-020 — Privacy Preference REST Semantics
+
+**Status:** Accepted
+
+**Context:** The preference domain (explicit 0–5 rows with concept-default fallback, single-row-per-(user, concept) uniqueness, separate upsert and delete operations) predates any HTTP surface. The REST slice must expose inspection and bulk update without redefining resolution or introducing destructive surprises.
+
+**Decision:**
+
+1. `GET /api/v1/me/privacy-preferences` returns the full effective surface: every vocabulary concept in deterministic code order, each with `conceptCode`, `label`, `effectiveSensitivity` (explicit value or concept default, resolved by the existing `EffectiveSensitivityResolver`), and `explicit` (whether the user configured it). No database IDs, credentials, or timestamps.
+2. `PUT /api/v1/me/privacy-preferences` takes `{"preferences": {CODE: 0–5}}` with merge semantics: entries present are upserted (existing rows updated, never duplicated); concepts absent from the request are left untouched. There is deliberately no replace/delete-through-PUT; reverting to default stays a service-level delete with no REST exposure in this slice.
+3. Unknown concept codes are rejected with HTTP 400 (`IllegalArgumentException` → existing problem mapping), never silently created. Range violations are rejected at the DTO boundary (Bean Validation) and re-guarded in the service.
+4. Writes run per-entry in short `REQUIRES_NEW` transactions over the existing find-then-save upsert; a lost-insert race on `UNIQUE(user_id, concept_id)` converges through re-read with no Java synchronization, matching the assessment/recommendation/notification pattern.
+5. Identity comes only from `AuthenticatedUsers.requireUserId(authentication)`; the contract carries no user identity field. No migration: the V6 schema already supports everything.
+
+**Consequences:**
+
+- Clients always see the complete preference surface, so defaults are visible without any rows existing; updates are idempotent and safe to repeat or send partially.
+- Effective-sensitivity rules stay single-sourced in the resolver; only future assessments consume new values — historical assessments are untouched, consistent with §19.
+- A future explicit "reset to default" REST operation would build on the existing service delete, not on PUT semantics.
+
