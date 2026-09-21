@@ -820,6 +820,47 @@ idempotency, merge, persisted preference proven to flow into
 `ImpactAssessmentService` personalized scores); documented in
 ARCHITECTURE.md §28 and ADR-020.
 
+Assessment + recommendation REST slice implemented and tested successfully
+(see DECISIONS.md ADR-021):
+- `GET /api/v1/me/impact-assessments` returns the user's assessment
+summaries newest first (`id`, `policyId`, `versionNumber`,
+`previousVersionNumber`, `aggregateScore`, `aggregateBand`,
+`personalizationRulesVersion`, `createdAt`; no breakdown rows)
+via `findByUser_IdOrderByCreatedAtDescIdDesc` (repository-level
+ownership filtering, id tie-break for determinism)
+- `GET /api/v1/me/impact-assessments/{assessmentId}` returns the
+assessment plus its breakdowns in engine ranking order, each with
+the persisted system snapshot (`systemNormalized`/`systemBand`/
+`systemRulesVersion`), `effectiveSensitivity`, and personalized
+snapshot; scores are read, never recomputed
+- `GET /api/v1/me/recommendations` returns the user's
+recommendations newest first using the entity's real fields
+(`ruleId`, `ruleOrder`, `actionKind`, `conceptCode`,
+`personalizedNormalized`/`personalizedBand`,
+`recommendationRulesVersion`); ownership derived through the
+assessment at the repository level
+(`findByAssessment_User_IdOrderByCreatedAtDescIdDesc`), no
+duplicated `user_id`
+- `GET /api/v1/me/recommendations/{recommendationId}` returns the
+recommendation with its assessment navigation context (`policyId`,
+`versionNumber`)
+- Identity only from `requireUserId`; services never touch
+`SecurityContextHolder`; cross-user/unknown ids → 404 (never 403),
+malformed UUIDs → 400, missing/invalid JWT → 401; DTO mapping
+runs inside the existing service read transactions (lazy
+`newVersion`/`policy` safe; no `EntityGraph`, no EAGER changes)
+- No migration (V1–V16 byte-for-byte unchanged), no scoring/
+recommendation/notification/fan-out/ownership changes; the
+existing "current/pending set = latest assessment's set"
+semantics preserved with no new domain state
+- `ImpactAssessmentControllerTest` + `RecommendationControllerTest`
+(slice: delegation, shape, 404/400, client-`userId` override
+rejection) + `ImpactAssessmentRecommendationApiIntegrationTest`
+(filters-enabled Testcontainers: 401s, isolation with cross-user
+404s, deterministic ordering, exact persisted-field mapping,
+injection resistance, empty states, real pipeline visibility);
+documented in ARCHITECTURE.md §25/§28 and ADR-021.
+
 ## Next Action
 
 The next implementation task is the next approved slice

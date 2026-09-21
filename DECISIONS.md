@@ -437,3 +437,26 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Effective-sensitivity rules stay single-sourced in the resolver; only future assessments consume new values — historical assessments are untouched, consistent with §19.
 - A future explicit "reset to default" REST operation would build on the existing service delete, not on PUT semantics.
 
+---
+
+## ADR-021 — Assessment + Recommendation REST Read Surface
+
+**Status:** Accepted
+
+**Context:** The deterministic chain Policy change → ChangeConceptMatch → ChangeImpact → EffectiveSensitivity → ImpactAssessment → Breakdown → Recommendation → Notification is complete and personalized data is generated, but users can only see the notification feed: nothing exposes the assessment or recommendation details behind a notification. The read-side loop must close with authenticated, user-scoped endpoints that reuse the existing entity/repository/service model without redefining scoring, ownership, or notification semantics.
+
+**Decision:**
+
+1. Four endpoints, all under `/api/v1/me` behind the existing Phase 8B authentication (`anyRequest().authenticated()` already protects them; no `SecurityConfig` change): `GET /api/v1/me/impact-assessments`, `GET /api/v1/me/impact-assessments/{assessmentId}`, `GET /api/v1/me/recommendations`, `GET /api/v1/me/recommendations/{recommendationId}`. The path identifiers are the existing domain UUIDs; no new identifier is invented.
+2. Identity comes only from `AuthenticatedUsers.requireUserId(authentication)` in thin controllers (`ImpactAssessmentController`, `RecommendationController`); services receive an explicit `UUID userId` and never touch `SecurityContextHolder`. Cross-user or unknown ids map to HTTP 404 via new `ImpactAssessmentNotFoundException` / `RecommendationNotFoundException` (both extend `NoSuchElementException`, reusing the existing 404 problem mapping), never 403; malformed UUIDs reuse the existing 400 mapping; missing/invalid JWTs reuse the existing 401 entry point.
+3. Repository-level ownership filtering only: `findByIdAndUser_Id` + `findByUser_IdOrderByCreatedAtDescIdDesc` on `ImpactAssessmentRepository`; `findByIdAndAssessment_User_Id` + `findByAssessment_User_IdOrderByCreatedAtDescIdDesc` on `RecommendationRepository` (ownership derived through Recommendation → ImpactAssessment → User, preserving the V3/V4/V7/V8 no-duplicated-`user_id` convention). Nothing is loaded and filtered in Java. The `IdDesc` tie-break makes newest-first ordering deterministic when timestamps collide. No migration: all four are derived queries.
+4. Dedicated response DTOs (no entities exposed): `ImpactAssessmentSummaryResponse` (8 summary fields, no breakdowns), `ImpactAssessmentDetailResponse` (summary + breakdowns in the existing engine ranking order), `ImpactAssessmentBreakdownResponse` (persisted system snapshot + effective sensitivity + personalized snapshot + both rules versions, including the system `rulesVersion` read through the EAGER `changeImpact`), `RecommendationSummaryResponse` (the entity's real fields: `ruleId`, `ruleOrder`, `actionKind`, nullable `conceptCode`), `RecommendationDetailResponse` (row + `policyId`/`versionNumber` navigation context, no other duplicated domain state). Bands/action kinds render as enum names, matching the policy/notification conventions.
+5. DTO mapping runs inside the existing services' `@Transactional(readOnly = true)` read methods, so the lazy `newVersion`/`previousVersion`/`policy` associations resolve before the session closes (the `NotificationResponse` pattern). No `EntityGraph`/fetch join in this slice; the per-row lazy-load cost on these bounded, user-scoped reads is accepted, and no relationship is made EAGER.
+6. No new domain state: the existing "current/pending set = latest assessment's set" interpretation (ADR-009) is preserved as-is; no status model, no latest-pointer, no migration (V1–V16 unchanged), no scoring/recommendation/notification/fan-out/ownership change.
+
+**Consequences:**
+
+- A client can navigate Notification → `assessmentId` → assessment detail → breakdowns → recommendations using existing IDs, with every number shown read straight from the persisted rows (no second scoring algorithm exists in the read path).
+- Pagination and index hardening for these feeds belong to Phase 13, as with the notification feed.
+- Any future write operation on assessments or recommendations (none exists today; both are append-only) would need its own decision; this slice is strictly read-only.
+

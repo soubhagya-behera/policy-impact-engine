@@ -22,6 +22,9 @@ import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentBreakdown;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentBreakdownRepository;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentRepository;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactBand;
+import com.soubhagya.policyimpactengine.impact.web.dto.ImpactAssessmentBreakdownResponse;
+import com.soubhagya.policyimpactengine.impact.web.dto.ImpactAssessmentDetailResponse;
+import com.soubhagya.policyimpactengine.impact.web.dto.ImpactAssessmentSummaryResponse;
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatch;
 import com.soubhagya.policyimpactengine.intelligence.domain.ChangeConceptMatchRepository;
 import com.soubhagya.policyimpactengine.intelligence.domain.PrivacyConcept;
@@ -127,6 +130,51 @@ public class ImpactAssessmentService {
 			throw new IllegalArgumentException("User id must not be null");
 		}
 		return assessmentRepository.findByUser_IdOrderByCreatedAtDesc(userId);
+	}
+
+	/**
+	 * Authenticated read API: the user's assessment summaries, newest
+	 * first, mapped inside this read transaction so the lazy
+	 * {@code newVersion}, {@code previousVersion}, and
+	 * {@code newVersion.policy} associations resolve before the
+	 * session closes. No scores are recomputed; the DTO carries the
+	 * persisted summary facts only (no breakdown rows).
+	 */
+	@Transactional(readOnly = true)
+	public List<ImpactAssessmentSummaryResponse> listAssessmentSummaries(
+			UUID userId) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		return assessmentRepository.findByUser_IdOrderByCreatedAtDescIdDesc(userId).stream()
+				.map(ImpactAssessmentSummaryResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Authenticated read API: one of the user's assessments plus its
+	 * ordered breakdown rows, mapped inside this read transaction. A
+	 * foreign id behaves as not-found and never reveals whether the
+	 * row exists.
+	 */
+	@Transactional(readOnly = true)
+	public ImpactAssessmentDetailResponse getAssessmentDetail(
+			UUID userId, UUID assessmentId) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		if (assessmentId == null) {
+			throw new IllegalArgumentException("Assessment id must not be null");
+		}
+		ImpactAssessment assessment = assessmentRepository.findByIdAndUser_Id(assessmentId, userId)
+				.orElseThrow(() -> new ImpactAssessmentNotFoundException("Assessment not found"));
+		List<ImpactAssessmentBreakdownResponse> breakdowns = breakdownRepository
+				.findByAssessment_IdOrderByPersonalizedNormalizedDescConceptCodeAsc(assessment.getId())
+				.stream()
+				.map(ImpactAssessmentBreakdownResponse::from)
+				.toList();
+		return ImpactAssessmentDetailResponse.from(
+				assessment, breakdowns);
 	}
 
 	@Transactional(readOnly = true)

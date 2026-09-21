@@ -17,6 +17,8 @@ import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentBreakdownR
 import com.soubhagya.policyimpactengine.notification.application.NotificationService;
 import com.soubhagya.policyimpactengine.recommendation.domain.Recommendation;
 import com.soubhagya.policyimpactengine.recommendation.domain.RecommendationRepository;
+import com.soubhagya.policyimpactengine.recommendation.web.dto.RecommendationDetailResponse;
+import com.soubhagya.policyimpactengine.recommendation.web.dto.RecommendationSummaryResponse;
 
 /**
  * Phase 2R — user-triggered recommendation derivation over the user's
@@ -130,6 +132,45 @@ public class RecommendationService {
 		}
 		ImpactAssessment assessment = assessmentService.getAssessment(userId, newVersionId);
 		return findRecommendations(assessment.getId());
+	}
+
+	/**
+	 * Authenticated read API: the user's recommendations across all of
+	 * their assessments, newest first, mapped inside this read
+	 * transaction. Ownership is derived through the assessment
+	 * (Recommendation → ImpactAssessment → User) at the repository
+	 * level; no rows are loaded and filtered in Java. A foreign id
+	 * behaves as not-found and never reveals whether the row exists.
+	 */
+	@Transactional(readOnly = true)
+	public List<RecommendationSummaryResponse> listRecommendationResponses(UUID userId) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		return recommendationRepository.findByAssessment_User_IdOrderByCreatedAtDescIdDesc(userId)
+				.stream()
+				.map(RecommendationSummaryResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Authenticated read API: one of the user's recommendations with
+	 * its assessment navigation context, mapped inside this read
+	 * transaction so the lazy {@code assessment},
+	 * {@code newVersion}, and {@code newVersion.policy} associations
+	 * resolve before the session closes.
+	 */
+	@Transactional(readOnly = true)
+	public RecommendationDetailResponse getRecommendationDetail(UUID userId, UUID recommendationId) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		if (recommendationId == null) {
+			throw new IllegalArgumentException("Recommendation id must not be null");
+		}
+		return recommendationRepository.findByIdAndAssessment_User_Id(recommendationId, userId)
+				.map(RecommendationDetailResponse::from)
+				.orElseThrow(() -> new RecommendationNotFoundException("Recommendation not found"));
 	}
 
 	private List<Recommendation> insertRecommendations(ImpactAssessment assessment) {
