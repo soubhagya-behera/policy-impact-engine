@@ -22,6 +22,12 @@ import com.soubhagya.policyimpactengine.user.domain.UserRepository;
  * (see DECISIONS.md ADR-016): the service reads the persisted
  * {@link User} directly from {@link UserRepository}. No transfer
  * authorization, no REST endpoint, no authentication.
+ *
+ * <p>Authenticated policy hardening: registration assigns the
+ * authenticated user as owner, and every read is owner-scoped at
+ * the repository level. Cross-user access behaves as not-found and
+ * never reveals whether the row exists. Ownership is immutable
+ * through this API: no transfer operation is exposed.
  */
 @Service
 public class PolicyService {
@@ -40,10 +46,22 @@ public class PolicyService {
 		this.userRepository = userRepository;
 	}
 
+	/**
+	 * Registers a policy owned by the given user. The owner always
+	 * comes from the authenticated principal via the controller; the
+	 * request carries no owner identity.
+	 */
 	@Transactional
-	public PolicyResponse register(String name, String url) {
+	public PolicyResponse register(UUID userId, String name, String url) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
 		String validatedUrl = PolicyUrlValidator.validate(url);
-		Policy saved = repository.save(new Policy(name, validatedUrl));
+		User owner = userRepository.findById(userId)
+				.orElseThrow(() -> new NoSuchElementException("User " + userId + " not found"));
+		Policy policy = new Policy(name, validatedUrl);
+		policy.setOwner(owner);
+		Policy saved = repository.save(policy);
 		// Flush so that @CreationTimestamp / @UpdateTimestamp are populated
 		// before mapping to the response DTO; without flush the timestamps
 		// remain null in the first transaction flush.
@@ -51,16 +69,28 @@ public class PolicyService {
 		return PolicyResponse.from(saved);
 	}
 
+	/**
+	 * Returns the user's policy. A foreign id behaves as not-found.
+	 */
 	@Transactional(readOnly = true)
-	public PolicyResponse getById(UUID id) {
-		return repository.findById(id)
+	public PolicyResponse get(UUID userId, UUID id) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		return repository.findByIdAndOwner_Id(id, userId)
 				.map(PolicyResponse::from)
 				.orElseThrow(() -> new NoSuchElementException("Policy " + id + " not found"));
 	}
 
+	/**
+	 * Returns the user's policies in registration order, oldest first.
+	 */
 	@Transactional(readOnly = true)
-	public List<PolicyResponse> list() {
-		return repository.findAll().stream()
+	public List<PolicyResponse> list(UUID userId) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		return repository.findByOwner_IdOrderByCreatedAtAscIdAsc(userId).stream()
 				.map(PolicyResponse::from)
 				.toList();
 	}

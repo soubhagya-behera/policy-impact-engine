@@ -23,6 +23,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
+import com.soubhagya.policyimpactengine.user.domain.User;
 import com.soubhagya.policyimpactengine.user.domain.UserRepository;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,11 +39,14 @@ class PolicyServiceTest {
 	private PolicyService service;
 
 	@Test
-	void registerValidatesSavesAndReturnsResponse() {
+	void registerValidatesAssignsOwnerSavesAndReturnsResponse() {
+		User owner = userWithId();
 		Policy saved = persistedPolicy("Acme Privacy Policy", "https://example.com/privacy");
+		when(userRepository.findById(owner.getId())).thenReturn(Optional.of(owner));
 		when(repository.save(any(Policy.class))).thenReturn(saved);
 
-		PolicyResponse response = service.register("Acme Privacy Policy", "https://example.com/privacy");
+		PolicyResponse response = service.register(owner.getId(),
+				"Acme Privacy Policy", "https://example.com/privacy");
 
 		assertThat(response.id()).isEqualTo(saved.getId());
 		assertThat(response.name()).isEqualTo("Acme Privacy Policy");
@@ -50,60 +54,95 @@ class PolicyServiceTest {
 		assertThat(response.status()).isEqualTo("ACTIVE");
 		assertThat(response.createdAt()).isEqualTo(saved.getCreatedAt());
 		assertThat(response.updatedAt()).isEqualTo(saved.getUpdatedAt());
+
+		ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
+		verify(repository).save(captor.capture());
+		assertThat(captor.getValue().getOwner()).isSameAs(owner);
 	}
 
 	@Test
 	void registerPersistsValidatedUrl() {
+		User owner = userWithId();
+		when(userRepository.findById(owner.getId())).thenReturn(Optional.of(owner));
 		when(repository.save(any(Policy.class)))
 				.thenAnswer(invocation -> invocation.getArgument(0));
 
-		service.register("Acme Privacy Policy", "  https://example.com/privacy  ");
+		service.register(owner.getId(), "Acme Privacy Policy", "  https://example.com/privacy  ");
 
 		ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
 		verify(repository).save(captor.capture());
 		assertThat(captor.getValue().getUrl()).isEqualTo("https://example.com/privacy");
+		assertThat(captor.getValue().getOwner()).isSameAs(owner);
 	}
 
 	@Test
 	void registerRejectsInvalidUrlWithoutSaving() {
-		assertThatThrownBy(() -> service.register("Acme Privacy Policy", "http://example.com/privacy"))
+		assertThatThrownBy(() -> service.register(UUID.randomUUID(),
+				"Acme Privacy Policy", "http://example.com/privacy"))
 				.isInstanceOf(IllegalArgumentException.class)
 				.hasMessageContaining("https");
+
+		verifyNoInteractions(repository);
+		verifyNoInteractions(userRepository);
+	}
+
+	@Test
+	void registerRejectsUnknownUser() {
+		UUID unknown = UUID.randomUUID();
+		when(userRepository.findById(unknown)).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> service.register(unknown,
+				"Acme Privacy Policy", "https://example.com/privacy"))
+				.isInstanceOf(NoSuchElementException.class);
 
 		verifyNoInteractions(repository);
 	}
 
 	@Test
-	void getByIdReturnsResponse() {
+	void getReturnsOwnedPolicy() {
+		User owner = userWithId();
 		Policy saved = persistedPolicy("Acme Privacy Policy", "https://example.com/privacy");
-		when(repository.findById(saved.getId())).thenReturn(Optional.of(saved));
+		when(repository.findByIdAndOwner_Id(saved.getId(), owner.getId()))
+				.thenReturn(Optional.of(saved));
 
-		PolicyResponse response = service.getById(saved.getId());
+		PolicyResponse response = service.get(owner.getId(), saved.getId());
 
 		assertThat(response.id()).isEqualTo(saved.getId());
 		assertThat(response.url()).isEqualTo("https://example.com/privacy");
 	}
 
 	@Test
-	void getByIdThrowsWhenMissing() {
+	void getThrowsWhenMissingOrForeign() {
+		User owner = userWithId();
 		UUID id = UUID.randomUUID();
-		when(repository.findById(id)).thenReturn(Optional.empty());
+		when(repository.findByIdAndOwner_Id(id, owner.getId())).thenReturn(Optional.empty());
 
-		assertThatThrownBy(() -> service.getById(id))
+		assertThatThrownBy(() -> service.get(owner.getId(), id))
 				.isInstanceOf(NoSuchElementException.class);
 	}
 
 	@Test
-	void listReturnsAllPolicies() {
-		when(repository.findAll()).thenReturn(List.of(
+	void listReturnsOnlyOwnedPolicies() {
+		User owner = userWithId();
+		when(repository.findByOwner_IdOrderByCreatedAtAscIdAsc(owner.getId())).thenReturn(List.of(
 				persistedPolicy("First Policy", "https://first.example/privacy"),
 				persistedPolicy("Second Policy", "https://second.example/terms")));
 
-		List<PolicyResponse> responses = service.list();
+		List<PolicyResponse> responses = service.list(owner.getId());
 
 		assertThat(responses).hasSize(2);
 		assertThat(responses).extracting(PolicyResponse::name)
 				.containsExactly("First Policy", "Second Policy");
+	}
+
+	@Test
+	void nullUserIdsAreRejected() {
+		assertThatThrownBy(() -> service.register(null, "P", "https://example.com/p"))
+				.isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> service.get(null, UUID.randomUUID()))
+				.isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> service.list(null))
+				.isInstanceOf(IllegalArgumentException.class);
 	}
 
 	private Policy persistedPolicy(String name, String url) {
@@ -112,6 +151,19 @@ class PolicyServiceTest {
 		policy.setCreatedAt(Instant.parse("2026-09-14T10:00:00Z"));
 		policy.setUpdatedAt(Instant.parse("2026-09-14T10:00:00Z"));
 		return policy;
+	}
+
+	private User userWithId() {
+		try {
+			User user = new User();
+			java.lang.reflect.Field id = User.class.getDeclaredField("id");
+			id.setAccessible(true);
+			id.set(user, UUID.randomUUID());
+			return user;
+		}
+		catch (ReflectiveOperationException reflectionFailure) {
+			throw new IllegalStateException("Cannot assign user id", reflectionFailure);
+		}
 	}
 
 }

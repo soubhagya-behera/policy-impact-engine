@@ -25,18 +25,19 @@ import jakarta.servlet.http.HttpServletResponse;
  *
  * <p>Stateless REST posture: CSRF, HTTP Basic, form login, and logout
  * are disabled and no server-side session is ever created.
- * {@code POST /api/v1/auth/register} and the existing
- * {@code /api/v1/policies/**} endpoints stay permitted (behavior
- * preservation — policy endpoints carry no per-user data today);
- * everything else defaults to authenticated so every endpoint added
- * after this slice is locked unless explicitly opened.
+ * {@code POST /api/v1/auth/register} and
+ * {@code POST /api/v1/auth/login} stay permitted; everything else
+ * defaults to authenticated so every endpoint added after this slice
+ * is locked unless explicitly opened.
  *
  * <p>Phase 8B adds Bearer-token authentication before authorization:
  * {@link JwtAuthenticationFilter} publishes the {@link AuthenticatedUser}
- * principal; {@code POST /api/v1/auth/login} joins the public endpoints.
- * No refresh tokens, roles, or {@code /me/*} endpoints yet (see
- * DECISIONS.md ADR-018). Security failures use
- * {@code application/problem+json} to match the RFC 7807 convention.
+ * principal. Authenticated policy hardening requires authentication
+ * for {@code /api/v1/policies/**} (owner-scoped reads, owner-assigned
+ * registration; see DECISIONS.md ADR-019).
+ * No refresh tokens or roles (see DECISIONS.md ADR-018). Security
+ * failures use {@code application/problem+json} to match the RFC 7807
+ * convention.
  */
 @Configuration
 @EnableWebSecurity
@@ -56,7 +57,6 @@ public class SecurityConfig {
 						.dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
-						.requestMatchers("/api/v1/policies/**").permitAll()
 						.anyRequest().authenticated())
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
 				.exceptionHandling(ex -> ex

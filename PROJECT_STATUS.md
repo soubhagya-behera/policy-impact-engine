@@ -769,9 +769,41 @@ notification/scheduler/scoring changes; documented in ADR-018).
 
 Phase 8C (refresh tokens) NOT implemented.
 
+Authenticated policy hardening slice implemented and tested successfully
+(owner-scoped policy boundary; see DECISIONS.md ADR-019):
+- `POST /api/v1/policies` assigns the authenticated principal as
+owner (`owner_id` persisted with the new row; no client-supplied
+owner identity accepted)
+- `GET /api/v1/policies/{id}` returns only owned policies via
+`findByIdAndOwner_Id` (foreign/unknown → 404, never 403)
+- `GET /api/v1/policies` returns only owned policies via
+`findByOwner_IdOrderByCreatedAtAscIdAsc` (registration order;
+repository-level filtering, no pagination)
+- `SecurityConfig` transitional `/api/v1/policies/**`
+permitAll removed; register/login stay public, everything else
+(incl. `/me/**`) authenticated; no roles/authorities
+- `PolicyService.assignOwner` preserved unchanged as the internal
+operation (existing tests + fan-out flows depend on it); no
+transfer/admin REST surface
+- `PolicyResponse`/`CreatePolicyRequest` unchanged (no ownerId
+field); validation, RFC 7807 errors, and 201 + Location
+semantics preserved
+- No migration (V15 column reused; V1–V16 byte-for-byte
+unchanged, no new index — hardening deferred to Phase 13);
+no fan-out/scheduler/scoring/recommendation/JWT changes
+- `PolicyServiceTest` (unit: ownership, 404, scoping) +
+`PolicyControllerTest` (slice: delegation, override rejection)
++ `PolicyRegistrationIntegrationTest` (filters-enabled vertical
+slice incl. 401s) + new `PolicyOwnershipIntegrationTest`
+(isolation, ordering, immutability, injection attempts);
+`SecurityFilterChainTest` + `JwtAuthenticationIntegrationTest`
+updated for the locked boundary; documented in ARCHITECTURE.md
+§9/§27/§28 and ADR-019.
+
 ## Next Action
 
-The next implementation task is the next Phase 2 slice (later pipeline
-stages),
+The next implementation task is the next approved slice
+(user privacy preference REST, assessment/recommendation REST,
+audit trail, or production hardening),
 as scoped in ARCHITECTURE.md §31.
 Wait for explicit instruction before beginning the next slice.

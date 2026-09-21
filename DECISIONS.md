@@ -393,3 +393,25 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Any registered user can obtain a 15-minute Bearer token; every protected endpoint resolves the same UUID the explicit-`userId` services already accept, so 10B-2B becomes a thin controller slice with no service changes.
 - Stolen-token exposure is bounded by the short TTL at the cost of re-login until 8C refresh exists; HS256 rotation means redeploy/restart (asymmetric keys deferred unless a multi-service future needs them).
 
+---
+
+## ADR-019 — Authenticated Policy Ownership Boundary
+
+**Status:** Accepted
+
+**Context:** Phase 10B-1 introduced the single nullable `policy.owner_id` FK and service-level `assignOwner`, but no REST path assigns ownership: `/api/v1/policies/**` stayed publicly permitted (the Phase 8A transitional opening, kept for behavior preservation), registration created ownerless rows, and reads were global. Meanwhile the scheduler fan-out, assessments, recommendations, and notifications are all user-scoped, so the policy boundary is the last unowned link in the loop.
+
+**Decision:**
+
+1. The transitional `/api/v1/policies/**` permitAll is removed. Policy endpoints require authentication; `POST /api/v1/auth/register` and `POST /api/v1/auth/login` stay public and everything else stays behind `anyRequest().authenticated()`.
+2. Registration assigns ownership: `POST /api/v1/policies` resolves the owner exclusively from `AuthenticatedUsers.requireUserId(authentication)` and persists `owner_id` with the new row. The request carries no owner identity (`CreatePolicyRequest` gains no `userId`/`ownerId` field); unknown JSON fields are ignored and body/query/header identity is rejected by construction.
+3. Reads are owner-scoped at the repository level: `findByIdAndOwner_Id` for detail and `findByOwner_IdOrderByCreatedAtAscIdAsc` for listing (registration order, id tie-break). No Java-side filtering. Cross-user and unknown ids both map to HTTP 404 (`NoSuchElementException`), never 403.
+4. Ownership is immutable through REST: `PolicyService.assignOwner` stays as the internal application operation (existing tests and fan-out flows depend on it) but gains no REST exposure; no transfer/admin/role surface is added.
+5. No migration: the V15 `owner_id` column already exists; no new index in this slice (per-user policy counts are bounded; index hardening belongs to Phase 13). V1–V16 stay byte-for-byte unchanged.
+
+**Consequences:**
+
+- Every policy created through the API has an owner from birth, so scheduled fan-out reaches a real user without a separate assignment step; legacy ownerless rows (pre-hardening, tests, internal flows) keep observing silently until owned.
+- The public policy listing/detail contract ends here: unauthenticated callers receive 401 and authenticated callers see only their own rows — a deliberate break of the transitional behavior, covered by updated chain and isolation tests.
+- Transfer authorization remains explicitly out of scope; `assignOwner` still performs no authorization and must not be exposed without a future decision.
+

@@ -162,13 +162,13 @@ The complete domain model is documented here as the target state. **All of the f
 
 ## 9. Entity Relationships and Ownership
 
-Intended relationships (IMPLEMENTED through Phase 10B-1):
+Intended relationships (IMPLEMENTED through authenticated policy hardening):
 
 - `Policy` 1—N `PolicyVersion` — a policy accumulates versions over time.
 - `PolicyVersion` 1—N `PolicySection` — a version is decomposed into sections.
 - `PolicyChange` references exactly two versions (previous and current) and, for modified or moved changes, the involved sections on both sides.
 - `PolicyChange` 1—N `ChangeConceptMatch`; each match references one `PrivacyConcept`.
-- `Policy` N—1 `User` (single nullable owner, Phase 10B-1, Flyway V15 `policy.owner_id`): a policy has exactly one owner; NULL means unowned. There is no policy_user, subscription, or watch table and no many-to-many relationship — users do not subscribe to policies and changes are never broadcast; only the single owner receives the personalized fan-out. An unowned policy is observed normally but stays silent (no assessment, recommendation, or notification). Owner assignment (`PolicyService.assignOwner`: null owner assigns, same owner is an idempotent no-op, different owner is rejected) carries no transfer authorization yet; tightening to authenticated ownership awaits Phase 8 (see DECISIONS.md ADR-016).
+- `Policy` N—1 `User` (single nullable owner, Phase 10B-1, Flyway V15 `policy.owner_id`): a policy has exactly one owner; NULL means unowned. There is no policy_user, subscription, or watch table and no many-to-many relationship — users do not subscribe to policies and changes are never broadcast; only the single owner receives the personalized fan-out. An unowned policy is observed normally but stays silent (no assessment, recommendation, or notification). Owner assignment (`PolicyService.assignOwner`: null owner assigns, same owner is an idempotent no-op, different owner is rejected) carries no transfer authorization and is not exposed through REST; REST registration assigns the authenticated user automatically and reads are owner-scoped with cross-user 404 (see DECISIONS.md ADR-019).
 - `User` 1—N `UserPrivacyPreference`; each preference references one `PrivacyConcept`. Defaults for unconfigured concepts are resolved in code from concept definitions, never backfilled into rows.
 - `User` 1—N `ImpactAssessment`; each assessment references a user, a policy change set, and records a score breakdown.
 - `ImpactAssessment` 1—N `Recommendation` — recommendations derive from an assessment and remain stable until a new change set arrives.
@@ -376,7 +376,7 @@ Security spans two distinct concerns: protecting the API and its users, and prot
 
 ### Application security (auth lands in Phase 8)
 
-- **Spring Security** with an explicit filter chain. Until Phase 8, a transitional permit-all configuration exists purely so pre-auth phases are testable locally; this is a documented temporary state, not a target. **Phase 8A IMPLEMENTED the first chain increment:** stateless, CSRF/Basic/form-login/logout disabled, `POST /api/v1/auth/register` and existing `/api/v1/policies/**` permitted (behavior preservation), everything else authenticated by default, with `application/problem+json` 401/403 entry points. No JWT mechanism yet (see DECISIONS.md ADR-017).
+- **Spring Security** with an explicit filter chain. Until Phase 8, a transitional permit-all configuration exists purely so pre-auth phases are testable locally; this is a documented temporary state, not a target. **Phase 8A IMPLEMENTED the first chain increment:** stateless, CSRF/Basic/form-login/logout disabled, `POST /api/v1/auth/register` permitted, everything else authenticated by default except the transitional `/api/v1/policies/**` opening, with `application/problem+json` 401/403 entry points. No JWT mechanism yet (see DECISIONS.md ADR-017). **Authenticated policy hardening CLOSED the transitional policy opening:** `/api/v1/policies/**` now requires authentication; registration assigns the authenticated user as owner and reads are owner-scoped (see DECISIONS.md ADR-019).
 - **Stateless API authentication.** No server-side sessions; the API is designed for token-based auth from the start.
 - **JWT access tokens (IMPLEMENTED, Phase 8B).** Short-lived HS256 access tokens (`PT15M` default) via Nimbus JOSE+JWT; claims exactly `sub` (application User UUID, never email) + `iat` + `exp`; secrets from environment/Git-ignored config only (fail fast when missing/weak), never committed. Refresh tokens remain PLANNED (Phase 8C, only on demonstrated need). See DECISIONS.md ADR-018.
 - **BCrypt password hashing (IMPLEMENTED, Phase 8A).** Passwords are hashed with BCrypt (`BCryptPasswordEncoder`); raw passwords are never persisted or logged. Policy: minimum 8 characters, maximum 72 UTF-8 bytes (rejected, never silently truncated).
@@ -403,9 +403,9 @@ All REST APIs are versioned under **`/api/v1`**. The following surface is PLANNE
 
 | Method | Path | Purpose | Phase |
 | --- | --- | --- | --- |
-| POST | `/api/v1/policies` | Register a policy | 1 |
-| GET | `/api/v1/policies` | List the user's policies | 1 |
-| GET | `/api/v1/policies/{id}` | Policy detail | 1 |
+| POST | `/api/v1/policies` | Register a policy (owner = authenticated user) | 1, owner-scoped (IMPLEMENTED) |
+| GET | `/api/v1/policies` | List the user's policies (owned only) | 1, owner-scoped (IMPLEMENTED) |
+| GET | `/api/v1/policies/{id}` | Policy detail (owned only, foreign → 404) | 1, owner-scoped (IMPLEMENTED) |
 | DELETE | `/api/v1/policies/{id}` | Remove a policy | 1 |
 | POST | `/api/v1/policies/{id}/check` | Trigger a manual fetch/check | 2–3 |
 | GET | `/api/v1/policies/{id}/versions` | Version history | 3 |

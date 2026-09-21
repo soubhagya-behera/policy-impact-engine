@@ -15,23 +15,31 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
+import com.soubhagya.policyimpactengine.user.web.AuthenticatedUser;
 import com.soubhagya.policyimpactengine.user.web.JwtAuthenticationFilter;
 
 /**
- * Web-layer tests for the policy registration API. The application service
- * is mocked; request binding, Bean Validation, status codes, response
- * shape, and RFC 7807 problem responses are verified here. Security
- * filters are disabled: authentication arrives in a later phase.
+ * Web-layer tests for the authenticated policy API. The application
+ * service is mocked; request binding, principal resolution, Bean
+ * Validation, status codes, response shape, and RFC 7807 problem
+ * responses are verified here. Security filters are disabled: the
+ * authenticated principal is supplied directly, exactly as the
+ * enabled filter chain would publish it.
  */
 @WebMvcTest(PolicyController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -48,16 +56,34 @@ class PolicyControllerTest {
 	@MockitoBean
 	private JwtAuthenticationFilter jwtAuthenticationFilter;
 
+	private UUID userId;
+	private Authentication authentication;
+
+	@BeforeEach
+	void authenticate() {
+		userId = UUID.randomUUID();
+		authentication = new UsernamePasswordAuthenticationToken(
+				new AuthenticatedUser(userId), null, List.of());
+		SecurityContextHolder.getContext().setAuthentication(authentication);
+	}
+
+	@AfterEach
+	void clearAuthentication() {
+		SecurityContextHolder.clearContext();
+	}
+
 	@Test
 	void registerReturnsCreatedPolicy() throws Exception {
 		PolicyResponse response = sampleResponse();
-		when(service.register("Acme Privacy Policy", "https://example.com/privacy")).thenReturn(response);
+		when(service.register(userId, "Acme Privacy Policy", "https://example.com/privacy"))
+				.thenReturn(response);
 
 		mockMvc.perform(post("/api/v1/policies")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"Acme Privacy Policy","url":"https://example.com/privacy"}
-								"""))
+								""")
+						.principal(authentication))
 				.andExpect(status().isCreated())
 				.andExpect(header().string("Location", "/api/v1/policies/" + response.id()))
 				.andExpect(jsonPath("$.id").value(response.id().toString()))
@@ -65,7 +91,7 @@ class PolicyControllerTest {
 				.andExpect(jsonPath("$.url").value("https://example.com/privacy"))
 				.andExpect(jsonPath("$.status").value("ACTIVE"));
 
-		verify(service).register("Acme Privacy Policy", "https://example.com/privacy");
+		verify(service).register(userId, "Acme Privacy Policy", "https://example.com/privacy");
 	}
 
 	@Test
@@ -74,7 +100,8 @@ class PolicyControllerTest {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"","url":"https://example.com/privacy"}
-								"""))
+								""")
+						.principal(authentication))
 				.andExpect(status().isBadRequest());
 
 		verifyNoInteractions(service);
@@ -86,7 +113,8 @@ class PolicyControllerTest {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"Acme Privacy Policy","url":""}
-								"""))
+								""")
+						.principal(authentication))
 				.andExpect(status().isBadRequest());
 
 		verifyNoInteractions(service);
@@ -100,7 +128,8 @@ class PolicyControllerTest {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"%s","url":"https://example.com/privacy"}
-								""".formatted(oversized)))
+								""".formatted(oversized))
+						.principal(authentication))
 				.andExpect(status().isBadRequest());
 
 		verifyNoInteractions(service);
@@ -109,34 +138,34 @@ class PolicyControllerTest {
 	@Test
 	void listReturnsPolicies() throws Exception {
 		PolicyResponse response = sampleResponse();
-		when(service.list()).thenReturn(List.of(response));
+		when(service.list(userId)).thenReturn(List.of(response));
 
-		mockMvc.perform(get("/api/v1/policies"))
+		mockMvc.perform(get("/api/v1/policies").principal(authentication))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$").isArray())
 				.andExpect(jsonPath("$.length()").value(1))
 				.andExpect(jsonPath("$[0].id").value(response.id().toString()))
 				.andExpect(jsonPath("$[0].name").value("Acme Privacy Policy"));
 
-		verify(service).list();
+		verify(service).list(userId);
 	}
 
 	@Test
 	void getByIdReturnsPolicy() throws Exception {
 		PolicyResponse response = sampleResponse();
-		when(service.getById(response.id())).thenReturn(response);
+		when(service.get(userId, response.id())).thenReturn(response);
 
-		mockMvc.perform(get("/api/v1/policies/{id}", response.id()))
+		mockMvc.perform(get("/api/v1/policies/{id}", response.id()).principal(authentication))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(response.id().toString()))
 				.andExpect(jsonPath("$.url").value("https://example.com/privacy"));
 
-		verify(service).getById(response.id());
+		verify(service).get(userId, response.id());
 	}
 
 	@Test
 	void getByIdRejectsMalformedIdentifier() throws Exception {
-		mockMvc.perform(get("/api/v1/policies/{id}", "not-a-uuid"))
+		mockMvc.perform(get("/api/v1/policies/{id}", "not-a-uuid").principal(authentication))
 				.andExpect(status().isBadRequest())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 				.andExpect(jsonPath("$.title").value("Malformed request"));
@@ -147,9 +176,9 @@ class PolicyControllerTest {
 	@Test
 	void getByIdReturnsProblemForUnknownPolicy() throws Exception {
 		UUID id = UUID.randomUUID();
-		when(service.getById(id)).thenThrow(new NoSuchElementException("Policy " + id + " not found"));
+		when(service.get(userId, id)).thenThrow(new NoSuchElementException("Policy " + id + " not found"));
 
-		mockMvc.perform(get("/api/v1/policies/{id}", id))
+		mockMvc.perform(get("/api/v1/policies/{id}", id).principal(authentication))
 				.andExpect(status().isNotFound())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 				.andExpect(jsonPath("$.title").value("Resource not found"))
@@ -158,14 +187,15 @@ class PolicyControllerTest {
 
 	@Test
 	void registerReturnsProblemForInvalidUrl() throws Exception {
-		when(service.register("Acme Privacy Policy", "http://example.com/privacy"))
+		when(service.register(userId, "Acme Privacy Policy", "http://example.com/privacy"))
 				.thenThrow(new IllegalArgumentException("Policy URL must use https"));
 
 		mockMvc.perform(post("/api/v1/policies")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"Acme Privacy Policy","url":"http://example.com/privacy"}
-								"""))
+								""")
+						.principal(authentication))
 				.andExpect(status().isBadRequest())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 				.andExpect(jsonPath("$.title").value("Invalid request"))
@@ -178,13 +208,48 @@ class PolicyControllerTest {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"","url":"https://example.com/privacy"}
-								"""))
+								""")
+						.principal(authentication))
 				.andExpect(status().isBadRequest())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 				.andExpect(jsonPath("$.title").value("Validation failed"))
 				.andExpect(jsonPath("$.errors.name").exists());
 
 		verifyNoInteractions(service);
+	}
+
+	@Test
+	void clientSuppliedUserIdCannotOverridePrincipal() throws Exception {
+		UUID foreignId = UUID.randomUUID();
+		PolicyResponse response = sampleResponse();
+		when(service.register(userId, "Acme Privacy Policy", "https://example.com/privacy"))
+				.thenReturn(response);
+		when(service.list(userId)).thenReturn(List.of(response));
+		when(service.get(userId, response.id())).thenReturn(response);
+
+		mockMvc.perform(post("/api/v1/policies")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"name":"Acme Privacy Policy","url":"https://example.com/privacy","userId":"%s","ownerId":"%s"}
+								""".formatted(foreignId, foreignId))
+						.header("X-User-Id", foreignId.toString())
+						.principal(authentication))
+				.andExpect(status().isCreated());
+
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("userId", foreignId.toString())
+						.header("X-User-Id", foreignId.toString())
+						.principal(authentication))
+				.andExpect(status().isOk());
+
+		mockMvc.perform(get("/api/v1/policies/{id}", response.id())
+						.queryParam("userId", foreignId.toString())
+						.principal(authentication))
+				.andExpect(status().isOk());
+
+		verify(service).register(userId, "Acme Privacy Policy", "https://example.com/privacy");
+		verify(service).list(userId);
+		verify(service).get(userId, response.id());
 	}
 
 	private PolicyResponse sampleResponse() {

@@ -23,18 +23,23 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
+import com.soubhagya.policyimpactengine.user.domain.User;
+import com.soubhagya.policyimpactengine.user.domain.UserRepository;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Phase 1F — Final integration / acceptance tests for the Policy registration
- * vertical slice.
+ * vertical slice, extended by authenticated policy hardening: every call
+ * carries a Bearer token and the persisted owner equals the principal.
  *
  * <p>Exercises the real application layers together:
- * HTTP → Controller → Validation → Service → URL Validator → Repository → PostgreSQL (Testcontainers).
+ * HTTP → Security → Controller → Validation → Service → URL Validator → Repository → PostgreSQL (Testcontainers).
  * No mocks for PolicyService or PolicyRepository. Flyway migrates the schema and
  * Hibernate validates it.
  */
 @SpringBootTest
-@AutoConfigureMockMvc(addFilters = false)
+@AutoConfigureMockMvc
 @Testcontainers
 class PolicyRegistrationIntegrationTest {
 
@@ -48,19 +53,29 @@ class PolicyRegistrationIntegrationTest {
 	@Autowired
 	private PolicyRepository repository;
 
+	@Autowired
+	private UserRepository userRepository;
+
+	@Autowired
+	private ObjectMapper objectMapper;
+
 	@BeforeEach
 	void cleanDatabase() {
 		repository.deleteAll();
+		userRepository.deleteAll();
 	}
 
 	@Test
 	void fullVerticalSlice_successfulRegistration_retrieveById_retrieveCollection() throws Exception {
+		String token = registerAndLogin("owner@example.com");
+		User owner = userRepository.findByEmail("owner@example.com").orElseThrow();
 		// 1. Successful registration with trimmed URL
 		String rawUrl = "  https://example.com/privacy  ";
 		String expectedNormalizedUrl = "https://example.com/privacy";
 		String policyName = "Acme Privacy Policy";
 
 		MvcResult postResult = mockMvc.perform(post("/api/v1/policies")
+						.header("Authorization", "Bearer " + token)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"%s","url":"%s"}
@@ -91,9 +106,12 @@ class PolicyRegistrationIntegrationTest {
 		assertThat(persisted.getStatus().name()).isEqualTo("ACTIVE");
 		assertThat(persisted.getCreatedAt()).isNotNull();
 		assertThat(persisted.getUpdatedAt()).isNotNull();
+		assertThat(persisted.getOwner()).isNotNull();
+		assertThat(persisted.getOwner().getId()).isEqualTo(owner.getId());
 
 		// 2. Retrieve the created policy by ID
-		mockMvc.perform(get("/api/v1/policies/{id}", generatedId))
+		mockMvc.perform(get("/api/v1/policies/{id}", generatedId)
+						.header("Authorization", "Bearer " + token))
 				.andExpect(status().isOk())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
 				.andExpect(jsonPath("$.id").value(generatedId.toString()))
@@ -104,7 +122,8 @@ class PolicyRegistrationIntegrationTest {
 				.andExpect(jsonPath("$.updatedAt").isNotEmpty());
 
 		// 3. Retrieve policy collection and verify created policy is present
-		mockMvc.perform(get("/api/v1/policies"))
+		mockMvc.perform(get("/api/v1/policies")
+						.header("Authorization", "Bearer " + token))
 				.andExpect(status().isOk())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
 				.andExpect(jsonPath("$").isArray())
@@ -115,10 +134,33 @@ class PolicyRegistrationIntegrationTest {
 	}
 
 	@Test
+	void unauthenticatedPolicyCallsReturn401() throws Exception {
+		mockMvc.perform(post("/api/v1/policies")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"name":"Acme Privacy Policy","url":"https://example.com/privacy"}
+								"""))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		mockMvc.perform(get("/api/v1/policies"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		mockMvc.perform(get("/api/v1/policies/{id}", UUID.randomUUID()))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		assertThat(repository.count()).isZero();
+	}
+
+	@Test
 	void invalidRegistration_httpUrl_returnsProblemJsonAndDoesNotPersist() throws Exception {
+		String token = registerAndLogin("bad-url@example.com");
 		long countBefore = repository.count();
 
 		mockMvc.perform(post("/api/v1/policies")
+						.header("Authorization", "Bearer " + token)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"Invalid Policy","url":"http://example.com/privacy"}
@@ -133,9 +175,11 @@ class PolicyRegistrationIntegrationTest {
 
 	@Test
 	void beanValidationFailure_blankName_returnsProblemJson() throws Exception {
+		String token = registerAndLogin("blank-name@example.com");
 		long countBefore = repository.count();
 
 		mockMvc.perform(post("/api/v1/policies")
+						.header("Authorization", "Bearer " + token)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"","url":"https://example.com/privacy"}
@@ -150,9 +194,11 @@ class PolicyRegistrationIntegrationTest {
 
 	@Test
 	void beanValidationFailure_blankUrl_returnsProblemJson() throws Exception {
+		String token = registerAndLogin("blank-url@example.com");
 		long countBefore = repository.count();
 
 		mockMvc.perform(post("/api/v1/policies")
+						.header("Authorization", "Bearer " + token)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{"name":"Acme Policy","url":""}
@@ -161,6 +207,25 @@ class PolicyRegistrationIntegrationTest {
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
 
 		assertThat(repository.count()).isEqualTo(countBefore);
+	}
+
+	private String registerAndLogin(String email) throws Exception {
+		mockMvc.perform(post("/api/v1/auth/register")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"correct-horse-1"}
+								""".formatted(email)))
+				.andExpect(status().isCreated());
+
+		MvcResult login = mockMvc.perform(post("/api/v1/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"correct-horse-1"}
+								""".formatted(email)))
+				.andExpect(status().isOk())
+				.andReturn();
+		return objectMapper.readTree(login.getResponse().getContentAsString())
+				.get("accessToken").asText();
 	}
 
 	private String extractId(String json) {

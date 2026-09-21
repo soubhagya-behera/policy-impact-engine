@@ -26,9 +26,10 @@ import com.soubhagya.policyimpactengine.user.domain.UserRepository;
  * Phase 8A — filter-chain tests with security filters enabled (no
  * {@code addFilters = false}).
  *
- * <p>Proves the transitional posture: registration is reachable without
- * authentication, existing policy endpoints remain reachable, and an
- * unknown protected endpoint answers 401 as
+ * <p>Proves the posture: registration is reachable without
+ * authentication, policy endpoints require authentication
+ * (authenticated policy hardening closed the transitional public
+ * opening), and an unknown protected endpoint answers 401 as
  * {@code application/problem+json}.
  */
 @SpringBootTest
@@ -85,10 +86,19 @@ class SecurityFilterChainTest {
 	}
 
 	@Test
-	void existingPolicyEndpointsRemainReachableWithoutAuthentication() throws Exception {
+	void policyEndpointsRequireAuthentication() throws Exception {
 		mockMvc.perform(get("/api/v1/policies"))
-				.andExpect(status().isOk())
-				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
+				.andExpect(status().isUnauthorized())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		mockMvc.perform(post("/api/v1/policies")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"name":"Anon Policy","url":"https://example.com/privacy"}
+								"""))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
 	}
 
 	@Test

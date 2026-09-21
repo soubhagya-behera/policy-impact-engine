@@ -220,7 +220,7 @@ class JwtAuthenticationIntegrationTest {
 	}
 
 	@Test
-	void registerAndPoliciesRemainPublic() throws Exception {
+	void policiesRequireAuthentication() throws Exception {
 		mockMvc.perform(post("/api/v1/auth/register")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
@@ -229,6 +229,23 @@ class JwtAuthenticationIntegrationTest {
 				.andExpect(status().isCreated());
 
 		mockMvc.perform(get("/api/v1/policies"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		String token;
+		{
+			MvcResult login = mockMvc.perform(post("/api/v1/auth/login")
+							.contentType(MediaType.APPLICATION_JSON)
+							.content("""
+									{"email":"public-user@example.com","password":"correct-horse-1"}
+									"""))
+					.andExpect(status().isOk())
+					.andReturn();
+			token = objectMapper.readTree(login.getResponse().getContentAsString())
+					.get("accessToken").asText();
+		}
+		mockMvc.perform(get("/api/v1/policies")
+						.header("Authorization", "Bearer " + token))
 				.andExpect(status().isOk());
 	}
 
