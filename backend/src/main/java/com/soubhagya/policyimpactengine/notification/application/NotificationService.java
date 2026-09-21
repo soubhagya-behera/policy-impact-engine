@@ -15,6 +15,7 @@ import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessment;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentRepository;
 import com.soubhagya.policyimpactengine.notification.domain.Notification;
 import com.soubhagya.policyimpactengine.notification.domain.NotificationRepository;
+import com.soubhagya.policyimpactengine.notification.web.dto.NotificationResponse;
 import com.soubhagya.policyimpactengine.recommendation.FrozenRecommendationRules;
 import com.soubhagya.policyimpactengine.recommendation.domain.Recommendation;
 import com.soubhagya.policyimpactengine.recommendation.domain.RecommendationRepository;
@@ -159,6 +160,45 @@ public class NotificationService {
 		}
 		return notificationRepository
 				.findByAssessment_User_IdAndReadAtIsNullOrderByCreatedAtDesc(userId);
+	}
+
+	/**
+	 * Phase 10B-2B — controller-facing feed: delegates to
+	 * {@link #listNotifications(UUID)} and maps to DTOs inside the same
+	 * read transaction, so the lazy {@code newVersion} and
+	 * {@code policy} associations resolve before the session closes.
+	 * No ownership or ordering logic is duplicated here.
+	 */
+	@Transactional(readOnly = true)
+	public List<NotificationResponse> listNotificationResponses(UUID userId) {
+		return listNotifications(userId).stream()
+				.map(NotificationResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Phase 10B-2B — controller-facing unread feed: delegates to
+	 * {@link #listUnreadNotifications(UUID)} and maps to DTOs inside
+	 * the same read transaction. No ownership or ordering logic is
+	 * duplicated here.
+	 */
+	@Transactional(readOnly = true)
+	public List<NotificationResponse> listUnreadNotificationResponses(UUID userId) {
+		return listUnreadNotifications(userId).stream()
+				.map(NotificationResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Phase 10B-2B — controller-facing mark-read: delegates to
+	 * {@link #markRead(UUID, UUID)} inside this transaction and maps to
+	 * the DTO before the session closes. Ownership validation,
+	 * not-found behavior, and idempotency all come from the existing
+	 * method; nothing is duplicated here.
+	 */
+	@Transactional
+	public NotificationResponse markReadResponse(UUID userId, UUID notificationId) {
+		return NotificationResponse.from(markRead(userId, notificationId));
 	}
 
 	private ImpactAssessment ownedAssessment(UUID userId, UUID assessmentId) {

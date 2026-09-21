@@ -690,7 +690,40 @@ silence, idempotency, V11/retry/stale intact, fan-out failure
 isolation with healing); documented in ADR-016; ARCHITECTURE.md
 §9/§25/§28 updated.
 
-Phase 10B-2 (authenticated notification REST feed) NOT implemented.
+Phase 10B-2B slice implemented and tested successfully
+(Phase 10B-2B = authenticated notification REST feed; no new ADR —
+ADR-015/ADR-016/ADR-018 already cover the architecture):
+- `NotificationResponse` DTO (exactly `id`, `assessmentId`,
+`policyId`, `versionNumber`, `createdAt`, `readAt`, `read`;
+no user/credential/score/recommendation/entity material)
+- `NotificationController` (`/api/v1/me/notifications`: `GET /`,
+`GET /unread`, `POST /{notificationId}/read`; thin —
+principal → `requireUserId` → explicit-`userId` service → DTO;
+no `SecurityContextHolder`, no client-supplied userId)
+- `NotificationService` gains `listNotificationResponses`,
+`listUnreadNotificationResponses`, and `markReadResponse`,
+each delegating to the existing entity methods and mapping
+via `NotificationResponse.from(...)` inside the existing
+transactions (lazy `newVersion`/`policy` safe; no
+`EntityGraph`/fetch join; per-row lazy-load cost accepted,
+pagination/index hardening deferred to Phase 13)
+- Existing `listNotifications`/`listUnreadNotifications`/
+`markRead` signatures and behavior preserved (ownership,
+`NotificationNotFoundException` → 404, idempotent mark-read)
+- Security unchanged (`SecurityConfig` untouched,
+`anyRequest().authenticated()` already protects `/me/**`;
+missing/invalid/expired/wrong-signature JWT → 401
+`Unauthenticated`; foreign/unknown notification → 404
+`Resource not found`, never 403; malformed UUID → 400
+`Malformed request`)
+- No migration (V1–V16 byte-for-byte unchanged), no
+auth/JWT/scheduler/scoring/recommendation/fan-out changes
+- `NotificationControllerTest` (slice: delegation, 7-field
+shape, 404/400, client-`userId` override rejection) +
+`NotificationFeedIntegrationTest` (filters-enabled
+Testcontainers: isolation, ordering, unread filtering,
+idempotency, 401/404/400, field allowlist); documented in
+ARCHITECTURE.md §25/§28/§31.
 Phase 8 (authentication & security) IN PROGRESS — Phase 8A scope (see DECISIONS.md ADR-017):
 
 Phase 8A slice implemented and tested successfully
