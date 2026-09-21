@@ -460,3 +460,82 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Pagination and index hardening for these feeds belong to Phase 13, as with the notification feed.
 - Any future write operation on assessments or recommendations (none exists today; both are append-only) would need its own decision; this slice is strictly read-only.
 
+---
+
+## ADR-022 — Audit Trail Foundation & Consistency Model (Phase 11)
+
+**Status:** Accepted
+
+**Context:** ARCHITECTURE.md §26 plans an append-only `AuditEvent` history with a user-visible trail, §9 relates `User` 1—N `AuditEvent`, and §28 plans `GET /api/v1/me/audit-events`, but no audit infrastructure exists: no entity, table, event catalog, actor/resource model, transaction rule, or emission wiring has ever been specified or built. Phase 11 must therefore start from explicit foundation decisions before any code lands. The project already has a settled failure-isolation philosophy for cross-module writes — separate short transactions after the business commit with accepted healable gaps (ADR-010 attempt recording, ADR-015 notification emission, ADR-016 fan-out) — and pervasive get-or-create idempotency backed by database uniqueness (Phases 2Q/2R/10A). The cryptographic chain protocol itself is defined separately in ADR-023; this record covers everything around it.
+
+**Decision:**
+
+1. `AuditEvent` is append-only and immutable. Rows are written once and never updated or deleted; there are no setters, no update/delete repository methods, and no mutation paths in code. Immutability is enforced by API absence and review, with value-domain CHECKs in the schema; the chain-link UNIQUE constraints defined in ADR-023 additionally make silent row replacement detectable at verification time.
+2. Audit writes use a **separate short transaction after the successful business transaction commits** — never inside it. An audit failure must not roll back the core business operation (registration, observation, preference update); the audit write is independently retryable (bounded re-read retry on chain-head collision, per ADR-023), and a persistently failing audit write propagates post-commit without undoing committed business state. This follows the ADR-010/015/016 failure-isolation philosophy: audit is a best-effort witness, never a correctness gate. The accepted tradeoff is explicit: unlike fan-out gaps (healed by repeat get-or-create), a lost audit write is a permanent omission detectable only by its absence — there is no retroactive healing without re-emitting the source event.
+3. Audit events are emitted **only at actual creation/mutation branches**. There is no emission on get-or-create re-reads (repeats return existing rows silently), no emission on ordinary GET requests, and no emission on repeated idempotent reads. This prevents duplicate audit events structurally, so no idempotency keys are introduced in the first implementation.
+4. Actor model: `actor_user_id` UUID NULL `REFERENCES app_user(id)`. NULL is reserved for future system actors; no system actor exists in Phase 11, so every first-wave event carries the authenticated user's UUID, resolved from the principal exactly like all other user-scoped writes. Actor identity is the UUID only — never an email, username, or principal string.
+5. Resource model: `resource_type` VARCHAR NULL (constrained short codes such as `USER`, `POLICY`, `POLICY_VERSION`) and `resource_id` UUID NULL form a polymorphic reference with **no polymorphic FK**. Both may be NULL for pure actor events. The absence of a database FK is deliberate: one column cannot reference many tables, and audit rows must survive even if referenced domain rows are later governed by retention rules audit itself does not yet define.
+6. Audit metadata is stored as compact JSON TEXT NULL whose exact canonical representation is defined by ADR-023. It carries only allowlisted, event-specific scalar fields and never credentials, password hashes, tokens, secrets, authorization headers, or raw policy content.
+7. Retention: Phase 11 introduces **no purge or delete mechanism**; rows accumulate monotonically like every other append-only history in the system (ADR-003 philosophy). A retention policy would itself need audit and authorization decisions and remains explicitly deferred — not silently assumed.
+8. Login failures are **not audited** in the first emission slice. A failed login has no authenticated actor (so no one could read it under the user-scoped feed), storing probed emails would create an attacker-writable PII sink and a potential enumeration oracle, and brute-force protection belongs to rate limiting (Phase 13), not to audit. Successful authentication may be emitted: the actor is known and the reader exists.
+9. No domain-fact duplication: `PolicyVersion`, `PolicyChangeRecord`, `ChangeImpact`, `ImpactAssessment`, `Recommendation`, `Notification`, and `PolicyFetchAttempt` rows are themselves immutable persisted history — re-logging their creation as audit events would duplicate domain state. `AuditEvent` records meaningful actor/system actions (authentication, ownership assignment, preference changes), not a shadow copy of every domain row.
+10. REST exposure is the user-scoped feed only (`GET /api/v1/me/audit-events`, per §28): the authenticated user reads rows where they are the actor, newest first, following the notification/assessment feed conventions (404-never-403, RFC 7807 problems). No admin API, no roles or authorities, no pagination or filters in the initial scope (pagination belongs to Phase 13).
+11. Clock: `occurred_at` is supplied by the application from an injected `Clock` (a dedicated `auditClock` bean in 11A; fixed/sequenced clocks in tests), truncated to microseconds before persisting — PostgreSQL `timestamptz` stores microsecond precision, and verification (ADR-023) recomputes hashes from persisted values, so nanosecond precision would break verify-after-persist. No wall-clock access inside the canonicalization function itself.
+12. Concurrency uses database serialization, never Java synchronization or static locks (project-wide rule, cf. ADR-012): concurrent appends resolve chain-head collisions through the `UNIQUE(prev_hash)` guard with bounded re-read retry, exactly like the 2Q/2R/10A uniqueness races.
+
+**Consequences:**
+
+- Core flows stay available even if audit writing degrades; the price is possible permanent audit omissions, stated openly rather than hidden behind a false durability claim.
+- Emission points stay small (creation branches only) and testable: each emitter test asserts one row per action and zero rows on repeats and reads.
+- The trail is user-scoped and secret-free by construction, so the read API needs no new authorization model.
+- All cryptographic detail lives in ADR-023; this record constrains everything around it (transactions, emission, retention, REST) so the chain protocol can be reviewed in isolation.
+
+---
+
+## ADR-023 — Cryptographic Audit Chain Protocol (Phase 11)
+
+**Status:** Accepted (protocol frozen for 11A–11D; any change requires a new ADR and a canonical-format version bump)
+
+**Context:** ARCHITECTURE.md §26 requires an immutable audit history but specifies no tampering-detection mechanism, and no hash-chain, canonicalization, or verification design exists anywhere in the repository. ADR-022 fixes the transaction, emission, retention, and REST boundaries; this record defines the exact cryptographic protocol so that "tamper-evident" is a precise, testable claim rather than a slogan. The protocol reuses only primitives already in the project: SHA-256 (JDK `MessageDigest`, per the existing `Sha256PolicyContentHasher` conventions) and Jackson compact JSON (already on the classpath via Spring Boot; the repository has no canonical-JSON convention — `ObjectMapper` is currently used only for RFC 7807 error rendering — so the smallest explicit deterministic choice is made here).
+
+**Decision:**
+
+1. Algorithm: SHA-256 over UTF-8 bytes; output rendered as 64-character lowercase hexadecimal. No new dependency.
+2. Chain: one single global audit chain. Per-aggregate chains are rejected as premature complexity: audit volume is ~1 row per significant event, so a global head is not a meaningful contention point.
+3. Canonical hash input is the eight textual fields below, in this exact order, joined with single `|` (U+007C) delimiters:
+   `version | event_type | actor_user_id | resource_type | resource_id | occurred_at | metadata | prev_hash`
+   - `version`: decimal ASCII of the canonical-format version, currently `1`. A format change bumps this number and requires a new ADR; verifiers dispatch on it.
+   - `event_type`: the enum name exactly as persisted in `event_type`.
+   - `actor_user_id`: lowercase canonical UUID text (`8-4-4-4-12`), or empty string when NULL.
+   - `resource_type`: the constrained code text, or empty string when NULL.
+   - `resource_id`: lowercase canonical UUID text, or empty string when NULL.
+   - `occurred_at`: UTC instant rendered as exactly `yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'` — six fractional digits, zero-padded. The writer truncates to microseconds first (ADR-022 §11); the fixed width keeps the representation stable across persist/re-read round-trips.
+   - `metadata`: the compact JSON text, or empty string when NULL.
+   - `prev_hash`: 64-character lowercase hex, or empty string when NULL (genesis only).
+4. NULL renders as the empty string. This is safe because the empty string is not a valid value for any field: UUID/hex/timestamp/code fields are never empty when present, and metadata is always a JSON object (never a bare empty string) when present — see §6.
+5. Escaping: within each textual field value, first replace `\` with `\\`, then replace `|` with `\|`, then join with unescaped `|` delimiters. Escape order is significant and fixed. Combined with §4 and the constrained vocabularies (`resource_type` codes match `[A-Z_]+`; UUID/hex/timestamp charsets exclude both `|` and `\`), distinct logical events cannot produce identical canonical bytes.
+6. Metadata is compact JSON with fully deterministic serialization: a single canonicalization unit (11A scope) owns both metadata writing and hash-input building so the form is single-sourced. Rules: Jackson `tools.jackson` `ObjectMapper`, default settings, no pretty printing; field order is the per-event code-defined order built via insertion-ordered maps; values restricted to string/integer/boolean/null; no floats (no `1.0` vs `1` ambiguity); no nested objects or arrays in the first wave. Metadata carries only allowlisted event-specific fields — never credentials, password hashes, tokens, secrets, authorization headers, raw policy content, or probed emails. Exact per-event allowlists are 11C scope; this ADR fixes the container and the exclusions.
+7. The canonicalization is implemented later as a pure Java function with no Spring dependencies (like the deterministic diff/match/scoring engines): pure input (field values + clock-supplied instant already truncated) → UTF-8 bytes → digest. No repository access, no clock access, no randomness — unit-testable without a Spring context or database.
+8. Chain rules:
+   - The first event (genesis) has `prev_hash = NULL`, stored as SQL NULL and rendering as empty string in the canonical input.
+   - Every later event sets `prev_hash` to the immediately preceding `event_hash`; `event_hash = SHA-256(canonical fields + prev_hash)`.
+   - `UNIQUE(prev_hash)` guarantees at most one child per predecessor and is the concurrency serializer; `UNIQUE(event_hash)` rejects duplicate-hash rows.
+   - PostgreSQL `UNIQUE` treats NULLs as distinct, so `UNIQUE(prev_hash)` alone cannot prevent twin geneses: single genesis is enforced by an application check (NULL `prev_hash` allowed only when the table is empty) backed by a partial unique index on a constant expression `WHERE prev_hash IS NULL` in the V17 schema.
+   - The database is the concurrency authority. Append algorithm: begin a short dedicated transaction → read the current chain head → construct the candidate → attempt insert → on unique-predecessor collision roll back and retry against the new head, bounded (11A fixes the bound; one transaction per attempt) → never Java synchronization.
+9. "Tamper-evident" means precisely this and no more: any modification, deletion, reordering, or insertion that breaks recomputation is detected when verification (11B) runs. It does **not** mean a privileged database writer cannot rewrite the entire chain consistently — they can. It does **not** mean tail truncation is detectable by linkage alone — a chain cut at the tail still verifies; only external row-count anchors (out of scope) would catch that. Cryptographic integrity (detection on verify) is claimed; tamper prevention and external immutable anchoring are explicitly out of scope and would each need their own ADR.
+10. Verification model (11B scope, defined here so writes are built verifiable): load the chain by following `prev_hash` links from the single genesis; assert exactly one genesis; assert each row's `prev_hash` equals the previous row's `event_hash`; recompute every `event_hash` from the stored fields using this canonicalization and compare; assert every row is visited exactly once (detects forks and orphans). The result model is deterministic: either OK or a first-failure record naming the position, event id, and reason (11B defines the result type; no implementation in this task).
+11. Golden vectors: implementation must freeze characterization vectors before merge. The genesis vector below is normative — computed deterministically from the rules above (133 UTF-8 bytes; digest cross-checked with two independent SHA-256 implementations) and published byte-exactly so anyone can recompute it:
+    - canonical input (133 bytes, no trailing newline):
+      `1|AUTH_USER_REGISTERED|11111111-1111-1111-1111-111111111111|USER|11111111-1111-1111-1111-111111111111|2026-01-01T00:00:00.000000Z|{}|`
+    - `event_hash = 6c3fd51f3d347c9d818b4cc35d6e2dafd83a11b849f62e1bee3c31f5fa3fcec4`
+    No hash value in this ADR is invented: the single vector above is calculated, and any further vectors are 11A/11B scope with the same freeze-before-merge rule.
+12. First-wave event catalog (11C emission scope; no other codes in Phase 11 without a new decision): `AUTH_USER_REGISTERED` (actor = new user, resource = `USER`/new user id), `AUTH_LOGIN_SUCCEEDED` (actor = user, resource = `USER`/user id), `POLICY_REGISTERED` (actor = owner, resource = `POLICY`/policy id), `POLICY_OWNER_ASSIGNED` (actor = assigned user, resource = `POLICY`/policy id), `PRIVACY_PREFERENCE_UPSERTED` and `PRIVACY_PREFERENCE_DELETED` (actor = user, resource = `USER`/user id, concept and sensitivities in metadata). Login failures, GET reads, observation internals, and per-domain-row creations are excluded per ADR-022 §§3/8/9; observation/version/assessment/recommendation/notification events may be proposed after the foundation is stable.
+13. Schema consequences (conceptual; implementation belongs to 11A as Flyway V17 — no migration is created by this task): `audit_event(id UUID PK, occurred_at timestamptz NOT NULL, actor_user_id UUID NULL FK app_user(id), event_type VARCHAR NOT NULL + catalog CHECK, resource_type VARCHAR NULL, resource_id UUID NULL, metadata TEXT NULL, prev_hash VARCHAR(64) NULL, event_hash VARCHAR(64) NOT NULL, UNIQUE(prev_hash), UNIQUE(event_hash), single-genesis partial unique index WHERE prev_hash IS NULL, composite feed index (actor_user_id, occurred_at DESC, id DESC))`.
+
+**Consequences:**
+
+- The chain is verifiable by recomputation from persisted rows alone — no sidecar state, no external service, no new dependency.
+- Canonicalization edge cases (NULLs, precision, escaping, key order) are decided up front, so 11A cannot drift into an ambiguous encoding and 11B tests have a frozen target.
+- The honest tamper model bounds what reviews and tests may claim: detection on verification, nothing stronger.
+- Any future format change (new field, new ordering, new algorithm) bumps `version` under a new ADR; old rows remain verifiable under version 1.
+

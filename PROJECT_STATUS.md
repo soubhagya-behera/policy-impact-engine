@@ -861,6 +861,45 @@ rejection) + `ImpactAssessmentRecommendationApiIntegrationTest`
 injection resistance, empty states, real pipeline visibility);
 documented in ARCHITECTURE.md §25/§28 and ADR-021.
 
+Phase 11A slice implemented and tested successfully
+(see DECISIONS.md ADR-022/ADR-023):
+- Flyway V17 `audit_event` table (V1–V16 byte-for-byte unchanged):
+immutable columns, six-event catalog CHECK, hash length CHECKs,
+`UNIQUE(prev_hash)` chain guard, `UNIQUE(event_hash)` duplicate
+guard, partial single-genesis index (plain UNIQUE cannot block
+twin NULL predecessors), actor feed index; no other indexes
+- Immutable append-only `AuditEvent` entity (lazy nullable actor
+association, no resource relationships, no setters/mutation) +
+frozen six-code `AuditEventType` enum
+- Pure Spring-free `AuditChain` (ADR-023 canonical order, NULL →
+empty, microsecond UTC timestamps, backslash-then-pipe escaping,
+UTF-8 SHA-256 lowercase hex) with the frozen genesis golden
+vector pinned byte-for-byte (`6c3fd51f…fcec4`, matched on first
+implementation run with no ADR change)
+- Small immutable `AuditMetadata` (insertion-ordered scalar-only
+compact JSON; floats/nesting/collections rejected)
+- `AuditService.append` in dedicated short transactions with
+bounded (5) `UNIQUE`-collision re-read retry and full candidate
+recomputation; audit failure never rolls back business state;
+actor set via unmanaged reference (no SELECT, no new module
+edge); existing single application `Clock` bean reused (a second
+`Clock` bean would break all bare-`Clock` injection points);
+service-level `listAuditEvents` newest-first, no Java filtering
+- No 11B verification service, no 11C emission wiring (no
+operation emits yet), no 11D REST, no retention purge, no
+roles/pagination/observability; no scoring/recommendation/
+notification/auth/policy/privacy behavior changes
+- `AuditChainTest` (pure unit: order, NULLs, UUID case,
+microsecond width, escaping, metadata determinism, UTF-8,
+golden vector) + `AuditMetadataTest` + `AuditEventTest` +
+`AuditEventRepositoryTest` (Testcontainers: FK/CHECK/UNIQUE/
+genesis/head/feed contract) +
+`AuditServiceIntegrationTest` (Testcontainers: genesis, chain
+linkage, clock default + truncation, 2-thread convergence with
+full chain-integrity proof, exhaustion → `AuditAppendException`
+with zero rows, unknown-actor FK failure, feed isolation);
+documented in ARCHITECTURE.md §26/§31.
+
 ## Next Action
 
 The next implementation task is the next approved slice
