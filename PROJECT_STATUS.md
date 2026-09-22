@@ -900,6 +900,50 @@ full chain-integrity proof, exhaustion → `AuditAppendException`
 with zero rows, unknown-actor FK failure, feed isolation);
 documented in ARCHITECTURE.md §26/§31.
 
+Phase 11B slice implemented and tested successfully
+(read-only cryptographic chain verification; see DECISIONS.md
+ADR-022/ADR-023 — both unchanged):
+- Immutable `AuditVerificationResult` (VALID with `verifiedCount`,
+including empty chain → VALID(0) as the locked fresh-install
+semantic; INVALID with failed event id, optional chain position,
+and deterministic `FailureReason`: malformed hash, multiple/
+missing genesis, shared predecessor, hash mismatch, broken link,
+missing predecessor, unreachable row; no metadata/resource/actor/
+timestamp contents)
+- `AuditVerificationService.verify()` in `@Transactional(readOnly
+= true)`: one bulk scalar read, then a pure O(N)/O(N) walk from
+the single genesis using `prev_hash` linkage only (never
+timestamps), recomputing every `event_hash` exclusively through
+the frozen `AuditChain` with persisted metadata TEXT verbatim
+and persisted instants directly; no writes, no
+`AuditService.append`, no Clock/EntityManager/SecurityContext/
+user loading; failure precedence malformed → genesis structure
+→ earliest chain-order failure → off-chain rows with lowest-id
+tie-breaking
+- `AuditEventRepository.findAllForVerification` narrow scalar
+projection (id, event type, actor id, resource type/id,
+occurred_at, metadata, prev/event hashes): the lazy actor
+association is never initialized and no `User` row is loaded
+- A VALID verdict means persisted rows are mutually consistent;
+it does not prove completeness against tail truncation
+(ADR-023 §9)
+- `AuditVerificationServiceTest` (22 pure unit tests: empty →
+VALID(0), ADR golden vector, valid 3-chain, metadata/NULL→{}/
+event-hash tampering, prev retarget fork, dangling predecessor,
+missing/twin genesis, shared fork, detached cycle, scrambled
+timestamps, uppercase/short/non-hex hashes, microsecond
+truncation, escaping, determinism, precedence, earliest failure)
++ `AuditVerificationIntegrationTest` (Testcontainers: empty DB,
+service-written genesis/chain, exact ADR golden-vector row,
+metadata/event-hash/prev-hash corruption, deleted predecessor,
+injected cycle, twin-genesis DB rejection with chain still
+valid, null-actor chain, before/after row-dump read-only proof)
+- No 11C emission wiring (no operation emits yet), no 11D REST/
+DTO/controller, no retention purge, no scheduled verification,
+no anchoring, no migration/schema change, no auth/policy/
+scoring/recommendation/notification behavior changes;
+documented in ARCHITECTURE.md §26/§31.
+
 ## Next Action
 
 The next implementation task is the next approved slice
