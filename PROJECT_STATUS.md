@@ -994,6 +994,40 @@ types, no verification changes, no migration (V1–V17
 byte-for-byte unchanged), no new infrastructure;
 documented in ARCHITECTURE.md §26/§31.
 
+Phase 11D slice implemented and tested successfully
+(authenticated self-scoped audit feed; see DECISIONS.md ADR-022/
+ADR-023 — both unchanged):
+- `GET /api/v1/me/audit-events` → 200 bare JSON array (`[]`
+when empty) behind the existing chain (no `SecurityConfig`
+change; missing/invalid JWT → existing 401): principal-only
+identity via `AuthenticatedUsers.requireUserId`, thin
+`audit.web.AuditEventController` delegating to a new
+`AuditService.listAuditEventResponses` that maps inside the
+existing read-only transaction over the unchanged
+`findByActorUser_IdOrderByOccurredAtDescIdDesc`
+(repository-level actor filtering, `occurred_at DESC, id DESC`,
+no Java sorting, no linkage ordering for presentation)
+- `AuditEventResponse` DTO with exactly eight safe fields (id,
+occurredAt, eventType name, resourceType/Id, verbatim metadata
+with null-vs-`{}` preserved, exact prev/event hashes); no actor
+id, user entity, credentials, tokens, email, content, or
+relationships — the lazy actor association is never touched
+- Feed is strictly read-only: GET emits nothing (count-proof),
+no `append` on the path, no verification/chain/emitter change
+- `AuditEventControllerTest` (6 slice tests: delegation, exact
+shape incl. nulls, empty array, `?userId` ignored, problem
+propagation, 401 without principal, verbatim `from()` mapping)
++ `AuditEventFeedIntegrationTest` (11 filters-enabled tests with
+real JWT: 401s, empty feed, bilateral isolation, newest-first,
+same-instant id tie-break, eight-field shape, verbatim
+metadata/hashes incl. nulls, `?userId` ignored, read-only
+proof, all six 11C types observable, leak scan)
+- `AuditVerificationService` remains internal with no HTTP
+exposure; admin feed, pagination/filtering (Phase 13),
+retention, anchoring, scheduling, login-failure auditing, new
+event types, export/search remain deferred; no migration, no new
+infrastructure; documented in ARCHITECTURE.md §26/§28/§31.
+
 ## Next Action
 
 The next implementation task is the next approved slice

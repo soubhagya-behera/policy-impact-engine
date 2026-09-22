@@ -17,6 +17,7 @@ import com.soubhagya.policyimpactengine.audit.domain.AuditEvent;
 import com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository;
 import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
 import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
+import com.soubhagya.policyimpactengine.audit.web.dto.AuditEventResponse;
 import com.soubhagya.policyimpactengine.user.domain.User;
 
 import jakarta.persistence.EntityManager;
@@ -112,6 +113,23 @@ public class AuditService {
 			throw new IllegalArgumentException("User id must not be null");
 		}
 		return repository.findByActorUser_IdOrderByOccurredAtDescIdDesc(userId);
+	}
+
+	/**
+	 * Phase 11D — read-only, user-scoped feed DTOs, newest first.
+	 * Repository-level ownership filtering; no Java-side filtering.
+	 * Mapping runs inside this read transaction; only scalar getters
+	 * are read, so the lazy actor association stays uninitialized.
+	 * The REST feed builds on this method. Never writes.
+	 */
+	@Transactional(readOnly = true)
+	public List<AuditEventResponse> listAuditEventResponses(UUID userId) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		return repository.findByActorUser_IdOrderByOccurredAtDescIdDesc(userId).stream()
+				.map(AuditEventResponse::from)
+				.toList();
 	}
 
 	private AuditEvent insertOnce(UUID actorUserId, AuditEventType eventType, String resourceType,
