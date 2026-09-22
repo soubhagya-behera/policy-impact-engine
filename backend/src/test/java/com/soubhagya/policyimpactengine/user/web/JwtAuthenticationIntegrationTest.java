@@ -89,8 +89,15 @@ class JwtAuthenticationIntegrationTest {
 	@Autowired
 	private ObjectMapper objectMapper;
 
+	// Phase 11C: registration and login emit audit rows referencing
+	// the user, so audit rows go first or user deletion violates the
+	// actor foreign key.
+	@Autowired
+	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
+
 	@BeforeEach
 	void clean() {
+		auditEventRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 

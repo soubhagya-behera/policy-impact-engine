@@ -944,6 +944,56 @@ no anchoring, no migration/schema change, no auth/policy/
 scoring/recommendation/notification behavior changes;
 documented in ARCHITECTURE.md §26/§31.
 
+Phase 11C slice implemented and tested successfully
+(post-commit audit emission wiring; see DECISIONS.md ADR-022/
+ADR-023 — both unchanged):
+- Six frozen event types wired exactly at successful business
+branches, always after the business transaction commits, as a
+best-effort witness: `AuthController.register` →
+`AUTH_USER_REGISTERED` (actor/resource = new user),
+`AuthController.login` → `AUTH_LOGIN_SUCCEEDED`
+(actor/resource = user; failures/unknown/malformed silent),
+`PolicyController.register` → `POLICY_REGISTERED`
+(actor = owner, resource = policy; GETs/observations/failures
+silent) — all with `AuditMetadata.empty()` and null occurredAt
+- `PolicyService.assignOwner` restructured to a non-transactional
+facade over a `TransactionTemplate` core returning whether the
+null→user assignment occurred; emits `POLICY_OWNER_ASSIGNED`
+(actor = assigned user per ADR-023, resource = policy) only on
+`true`; same-owner no-op, different-owner rejection, and unknown
+ids stay silent with existing exceptions preserved
+- `UserPrivacyPreferenceService` gains an outcome core: one
+`PRIVACY_PREFERENCE_UPSERTED` per created/changed preference
+with `{"conceptCode","oldSensitivity","newSensitivity"}` (null
+old = created), wired through bulk per-entry post-commit
+(partial-commit semantics preserved, race retry converges to one
+event), single upsert, and unchanged rewrites/absent keys/empty
+maps provably silent; `deletePreference` returns whether a row
+existed and emits `PRIVACY_PREFERENCE_DELETED` with
+`{"conceptCode","oldSensitivity"}` only then, with no REST
+exposure (ADR-020 intact)
+- Audit failure propagates post-commit without rolling back
+business state (proven for registration, owner assignment, and
+bulk update); no credential/token/secret/URL/content/email in
+any metadata (forbidden-key scans green)
+- `AuditEmissionAuthIntegrationTest` (8) +
+`AuditEmissionPolicyIntegrationTest` (8, incl. stub-fetcher
+FIRST_VERSION/UNCHANGED silence proof) +
+`AuditEmissionPreferenceIntegrationTest` (10, incl. 2-thread
+no-duplication proof); mixed operations leave
+`AuditVerificationService.verify()` VALID
+- Existing suites updated minimally: `AuditService` mocks in
+auth/policy controller slices, new deps in policy service unit
+tests, audit-first cleanup ordering in suites that trigger wired
+branches (auth, policy registration/ownership, preferences,
+assessment/recommendation, notification feed); the three exempt
+oversized tests untouched
+- No 11D REST/DTO/controller, no admin/pagination/retention/
+anchoring/scheduling, no login-failure auditing, no new event
+types, no verification changes, no migration (V1–V17
+byte-for-byte unchanged), no new infrastructure;
+documented in ARCHITECTURE.md §26/§31.
+
 ## Next Action
 
 The next implementation task is the next approved slice

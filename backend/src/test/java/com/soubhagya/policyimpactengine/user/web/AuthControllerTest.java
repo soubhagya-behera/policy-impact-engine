@@ -46,6 +46,11 @@ class AuthControllerTest {
 	@MockitoBean
 	private AuthLoginService loginService;
 
+	// Phase 11C: AuthController emits audit events post-commit; mocked
+	// so this slice stays isolated from the audit chain.
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.audit.application.AuditService auditService;
+
 	// Phase 8B: satisfies SecurityConfig wiring in this slice. Filters
 	// stay disabled, so the mock never executes.
 	@MockitoBean

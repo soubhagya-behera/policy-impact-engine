@@ -73,8 +73,15 @@ class ImpactAssessmentIntegrationTest {
 	private final DeterministicConceptMatcher conceptMatcher = new DeterministicConceptMatcher();
 	private final DeterministicImpactScoringEngine scoringEngine = new DeterministicImpactScoringEngine();
 
+	// Phase 11C: preference upserts emit audit rows referencing users,
+	// so audit rows go first or user deletion violates the actor
+	// foreign key.
+	@Autowired
+	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
+
 	@BeforeEach
 	void clean() {
+		auditEventRepository.deleteAll();
 		breakdownRepository.deleteAll();
 		assessmentRepository.deleteAll();
 		impactRepository.deleteAll();

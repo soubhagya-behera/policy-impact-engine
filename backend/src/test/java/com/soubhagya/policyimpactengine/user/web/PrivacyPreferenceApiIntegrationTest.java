@@ -108,8 +108,12 @@ class PrivacyPreferenceApiIntegrationTest {
 	@Autowired
 	private ObjectMapper objectMapper;
 
+	@Autowired
+	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository; // 11C: audit-first (actor FK)
+
 	@BeforeEach
 	void clean() {
+		auditEventRepository.deleteAll();
 		breakdownRepository.deleteAll();
 		assessmentRepository.deleteAll();
 		impactRepository.deleteAll();

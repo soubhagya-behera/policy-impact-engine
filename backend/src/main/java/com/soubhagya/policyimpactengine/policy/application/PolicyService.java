@@ -5,8 +5,13 @@ import java.util.NoSuchElementException;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import com.soubhagya.policyimpactengine.audit.application.AuditService;
+import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
+import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.web.PolicyUrlValidator;
@@ -28,22 +33,38 @@ import com.soubhagya.policyimpactengine.user.domain.UserRepository;
  * the repository level. Cross-user access behaves as not-found and
  * never reveals whether the row exists. Ownership is immutable
  * through this API: no transfer operation is exposed.
+ *
+ * <p>Phase 11C emits {@code POLICY_OWNER_ASSIGNED} through a narrow
+ * fenced {@code policy.application → audit.application} edge: the
+ * non-transactional facade commits the assignment first, then
+ * appends the audit event, so an audit failure never rolls back
+ * the committed ownership (see DECISIONS.md ADR-022). The actor is
+ * the assigned user, per ADR-023; no authentication context enters
+ * this internal operation.
  */
 @Service
 public class PolicyService {
 
 	private final PolicyRepository repository;
 	private final UserRepository userRepository;
+	private final TransactionTemplate assignOwnerTransaction;
+	private final AuditService auditService;
 
-	public PolicyService(PolicyRepository repository, UserRepository userRepository) {
+	public PolicyService(PolicyRepository repository, UserRepository userRepository,
+			PlatformTransactionManager transactionManager, AuditService auditService) {
 		if (repository == null) {
 			throw new IllegalArgumentException("PolicyRepository must not be null");
 		}
 		if (userRepository == null) {
 			throw new IllegalArgumentException("UserRepository must not be null");
 		}
+		if (transactionManager == null || auditService == null) {
+			throw new IllegalArgumentException("Dependencies must not be null");
+		}
 		this.repository = repository;
 		this.userRepository = userRepository;
+		this.assignOwnerTransaction = new TransactionTemplate(transactionManager);
+		this.auditService = auditService;
 	}
 
 	/**
@@ -104,17 +125,32 @@ public class PolicyService {
 	 * is performed here (a future phase tightens this to authenticated
 	 * ownership) and no REST endpoint exposes this operation.
 	 *
+	 * <p>Phase 11C — returns whether the assignment actually occurred
+	 * and emits {@code POLICY_OWNER_ASSIGNED} only then, after the
+	 * assignment commits. Same-owner no-ops and all failures stay
+	 * silent.
+	 *
 	 * @param userId identifier of the owning user
 	 * @param policyId identifier of the policy to own
+	 * @return true when a NULL owner became the given user
 	 */
-	@Transactional
-	public void assignOwner(UUID userId, UUID policyId) {
+	public boolean assignOwner(UUID userId, UUID policyId) {
 		if (userId == null) {
 			throw new IllegalArgumentException("User id must not be null");
 		}
 		if (policyId == null) {
 			throw new IllegalArgumentException("Policy id must not be null");
 		}
+		boolean assigned = assignOwnerTransaction.execute(
+				status -> assignOwnerOnce(userId, policyId));
+		if (assigned) {
+			auditService.append(userId, AuditEventType.POLICY_OWNER_ASSIGNED, "POLICY",
+					policyId, AuditMetadata.empty(), null);
+		}
+		return assigned;
+	}
+
+	private boolean assignOwnerOnce(UUID userId, UUID policyId) {
 		Policy policy = repository.findById(policyId)
 				.orElseThrow(() -> new NoSuchElementException("Policy " + policyId + " not found"));
 		User user = userRepository.findById(userId)
@@ -122,10 +158,10 @@ public class PolicyService {
 		if (policy.getOwner() == null) {
 			policy.setOwner(user);
 			repository.save(policy);
-			return;
+			return true;
 		}
 		if (policy.getOwner().getId().equals(userId)) {
-			return;
+			return false;
 		}
 		throw new IllegalStateException("Policy " + policyId + " already has a different owner");
 	}

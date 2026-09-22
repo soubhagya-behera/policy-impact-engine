@@ -94,8 +94,12 @@ class NotificationFeedIntegrationTest {
 	@Autowired
 	private ObjectMapper objectMapper;
 
+	@Autowired
+	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository; // 11C: audit-first (actor FK)
+
 	@BeforeEach
 	void clean() {
+		auditEventRepository.deleteAll();
 		notificationRepository.deleteAll();
 		assessmentRepository.deleteAll();
 		versionRepository.deleteAll();

@@ -47,8 +47,15 @@ class SecurityFilterChainTest {
 	@Autowired
 	private UserRepository userRepository;
 
+	// Phase 11C: registration emits an audit row referencing the new
+	// user, so audit rows go first or user deletion violates the actor
+	// foreign key.
+	@Autowired
+	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
+
 	@BeforeEach
 	void clean() {
+		auditEventRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 

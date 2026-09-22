@@ -62,8 +62,15 @@ class PolicyOwnershipIntegrationTest {
 	@Autowired
 	private ObjectMapper objectMapper;
 
+	// Phase 11C: registration, login, policy registration, and owner
+	// assignment emit audit rows referencing users, so audit rows go
+	// first or user deletion violates the actor foreign key.
+	@Autowired
+	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
+
 	@BeforeEach
 	void clean() {
+		auditEventRepository.deleteAll();
 		policyRepository.deleteAll();
 		userRepository.deleteAll();
 	}

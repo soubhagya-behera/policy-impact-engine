@@ -121,8 +121,15 @@ abstract class AssessmentRecommendationApiFixture {
 
 	protected final Sha256PolicyContentHasher hasher = new Sha256PolicyContentHasher();
 
+	// Phase 11C: registration, login, and preference updates emit
+	// audit rows referencing users, so audit rows go first or user
+	// deletion violates the actor foreign key.
+	@Autowired
+	protected com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
+
 	@BeforeEach
 	void clean() {
+		auditEventRepository.deleteAll();
 		notificationRepository.deleteAll();
 		recommendationRepository.deleteAll();
 		breakdownRepository.deleteAll();

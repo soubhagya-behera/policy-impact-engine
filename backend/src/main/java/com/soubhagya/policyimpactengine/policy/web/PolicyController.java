@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.soubhagya.policyimpactengine.audit.application.AuditService;
+import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
+import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
 import com.soubhagya.policyimpactengine.policy.web.dto.CreatePolicyRequest;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
@@ -29,18 +32,24 @@ import jakarta.validation.Valid;
  * owner-scoped. Identity never comes from the request body, query
  * parameters, headers, or path variables. Cross-user access behaves
  * as not-found.
+ *
+ * <p>Phase 11C emits {@code POLICY_REGISTERED} after the policy
+ * row commits. Reads, observations, and failed registrations never
+ * reach the emit line. No policy URL or content enters metadata.
  */
 @RestController
 @RequestMapping("/api/v1/policies")
 public class PolicyController {
 
 	private final PolicyService service;
+	private final AuditService auditService;
 
-	public PolicyController(PolicyService service) {
-		if (service == null) {
-			throw new IllegalArgumentException("PolicyService must not be null");
+	public PolicyController(PolicyService service, AuditService auditService) {
+		if (service == null || auditService == null) {
+			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.service = service;
+		this.auditService = auditService;
 	}
 
 	@PostMapping
@@ -48,6 +57,8 @@ public class PolicyController {
 			@Valid @RequestBody CreatePolicyRequest request) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
 		PolicyResponse response = service.register(userId, request.name(), request.url());
+		auditService.append(userId, AuditEventType.POLICY_REGISTERED, "POLICY",
+				response.id(), AuditMetadata.empty(), null);
 		URI location = URI.create("/api/v1/policies/" + response.id());
 		return ResponseEntity.created(location).body(response);
 	}

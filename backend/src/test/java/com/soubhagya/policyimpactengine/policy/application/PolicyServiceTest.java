@@ -35,6 +35,14 @@ class PolicyServiceTest {
 	@Mock
 	private UserRepository userRepository;
 
+	// Phase 11C: PolicyService gained assignment-transaction and audit
+	// dependencies; mocked so registration/read tests stay isolated.
+	@Mock
+	private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+	@Mock
+	private com.soubhagya.policyimpactengine.audit.application.AuditService auditService;
+
 	@InjectMocks
 	private PolicyService service;
 

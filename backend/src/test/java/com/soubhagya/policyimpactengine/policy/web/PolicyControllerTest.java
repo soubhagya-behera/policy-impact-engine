@@ -51,6 +51,11 @@ class PolicyControllerTest {
 	@MockitoBean
 	private PolicyService service;
 
+	// Phase 11C: PolicyController emits POLICY_REGISTERED post-commit;
+	// mocked so this slice stays isolated from the audit chain.
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.audit.application.AuditService auditService;
+
 	// Phase 8B: satisfies SecurityConfig wiring in this slice. Filters
 	// stay disabled, so the mock never executes.
 	@MockitoBean

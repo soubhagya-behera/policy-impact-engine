@@ -35,8 +35,15 @@ class UserPreferenceIntegrationTest {
 	@Autowired private UserService userService;
 	@Autowired private UserPrivacyPreferenceService prefService;
 
+	// Phase 11C: preference upserts/deletes emit audit rows referencing
+	// users, so audit rows go first or user deletion violates the actor
+	// foreign key.
+	@Autowired
+	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
+
 	@BeforeEach
 	void clean() {
+		auditEventRepository.deleteAll();
 		prefRepository.deleteAll();
 		userRepository.deleteAll();
 	}
