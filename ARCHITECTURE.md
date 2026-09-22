@@ -119,7 +119,7 @@ com.soubhagya.policyimpactengine
 ├── monitoring          # scheduler, PolicyFetchAttempt, retry/backoff
 ├── notification        # Notification feed
 ├── audit               # AuditEvent, append-only history
-└── ai                  # optional explanation adapter (FUTURE, Phase 12)
+└── ai                  # explanation adapter (IMPLEMENTED, Phase 12: optional, advisory-only)
 ```
 
 Dependency direction (one way, no cycles):
@@ -418,6 +418,7 @@ All REST APIs are versioned under **`/api/v1`**. The following surface is PLANNE
 | GET | `/api/v1/me/impact-summary` | Pending-impact digest for the user | 6 |
 | GET | `/api/v1/me/impact-assessments` | Personal assessment summaries, newest first (no breakdowns) | Assessment/Recommendation REST (IMPLEMENTED) |
 | GET | `/api/v1/me/impact-assessments/{id}` | Assessment detail with ordered breakdown | Assessment/Recommendation REST (IMPLEMENTED) |
+| POST | `/api/v1/me/impact-assessments/{id}/explanation` | Optional advisory prose for one persisted assessment (deterministic fallback when AI disabled/unavailable; authoritative facts echoed from DB) | 12 (IMPLEMENTED, per ADR-024) |
 | GET | `/api/v1/me/recommendations` | Current pending recommendations | 7, Assessment/Recommendation REST (IMPLEMENTED) |
 | GET | `/api/v1/me/recommendations/{id}` | Recommendation detail with assessment context | Assessment/Recommendation REST (IMPLEMENTED) |
 | POST | `/api/v1/auth/register` | Account registration | 8 |
@@ -470,7 +471,7 @@ The pipeline's determinism is the system's core asset, so testing is built aroun
 
 The following are deliberate extension points only. **None of them are implemented, and none are scheduled, unless a later phase explicitly requires them.** They are listed so the current architecture does not preclude them.
 
-- **Ollama / local LLM explanation layer** (Phase 12, optional): natural-language explanations of existing assessments; the deterministic engine remains authoritative (ADR-006).
+- **Ollama / local LLM explanation layer** (Phase 12, IMPLEMENTED per ADR-024): optional advisory prose for existing assessments; the deterministic engine remains authoritative (ADR-006). No cloud providers, chat, caching, or persistence.
 - **Queue/worker architecture:** the pipeline is trigger-agnostic (manual endpoint, scheduler, future webhook); a queue-backed worker is a new trigger, not a redesign. Kafka/RabbitMQ remain out of scope.
 - **Redis:** caching and distributed rate limiting, if scale ever justifies it.
 - **Distributed scheduling:** ShedLock (JDBC-backed) or PostgreSQL advisory locks if the application runs on multiple instances.
@@ -502,7 +503,7 @@ Implementation proceeds through the approved roadmap below. Phases are **vertica
 | 10B-1 | **Policy Ownership & Automatic Fan-Out (service layer)** | **Status: IMPLEMENTED.** Single nullable `policy.owner_id` FK (Flyway V15); `PolicyService.assignOwner` (assign / idempotent same-owner / reject different-owner, no transfer auth, no REST); scheduler hands the successful observation result to `NotificationFanOutService` (NEW_VERSION + ACTIVE + owned only; version via existing `findByPolicy_IdAndVersionNumber`; assessment → recommendation → Phase 10A hook in separate short transactions; uniqueness-backed idempotency, no new infrastructure; per-policy failure isolation with the accepted healable gap); `NotificationNotFoundException extends NoSuchElementException` for missing/foreign assessment/notification cases. No REST endpoints, no JWT/auth/filter-chain, no transfer/admin, no subscriptions/watch tables. See DECISIONS.md ADR-016. |
 | 10B-2B | **Authenticated Notification REST Feed** | **Status: IMPLEMENTED.** HTTP delivery (`GET /api/v1/me/notifications`, `GET /api/v1/me/notifications/unread`, `POST /api/v1/me/notifications/{notificationId}/read`) of the records created in 10A/10B-1, with Phase 8B authentication (principal → `requireUserId` → explicit-`userId` service → `NotificationResponse` DTO mapped inside the existing transactions; cross-user → 404, malformed UUID → 400, missing/invalid JWT → 401; no migration, V1–V16 unchanged; per-row lazy-load cost accepted, pagination/index hardening deferred to Phase 13). |
 | 11 | **Audit** | AuditEvent; append-only immutable history; user-visible trail; tests. Delivered incrementally: **11A IMPLEMENTED** (V17 foundation with SHA-256 global chain, append service, service-level reads; no emission/verification/REST — see DECISIONS.md ADR-022/ADR-023). **11B IMPLEMENTED** (read-only verification service with immutable first-failure result, linkage-ordered recomputation via frozen `AuditChain`, empty chain valid, unit + Testcontainers corruption coverage; no emission/REST). **11C IMPLEMENTED** (six frozen event types emitted post-commit: auth register/login + policy registration from controllers, owner assignment + preference upsert/delete via service facades; per-changed-preference granularity; no-op/failed silence; audit-failure isolation; emission integration coverage; no REST). **11D IMPLEMENTED** (authenticated self-scoped audit feed with exact eight-field DTO, verbatim metadata/hashes, slice + filters-enabled integration coverage; verification internal, no admin/pagination). |
-| 12 | **Optional Local AI** | Ollama integration for natural-language explanations only; advisory layer; deterministic engine remains authoritative (ADR-006). Skipped unless explicitly requested. |
+| 12 | **Optional Local AI** | Ollama integration for natural-language explanations only; advisory layer; deterministic engine remains authoritative (ADR-006). **IMPLEMENTED** (Phase 12, per ADR-024): user-triggered `POST /api/v1/me/impact-assessments/{id}/explanation`, provider abstraction with local Ollama HTTP implementation, deterministic fallback (safe default `ai.enabled=false`), ephemeral non-persisted prose with authoritative DB-echoed facts; no cloud/chat/caching/persistence. |
 | 13 | **Production Hardening** | Rate limiting; observability (Actuator); query indexes via Flyway migrations; Dockerization and deployment decisions. *New dependencies: Actuator; rate-limiting library if needed.* |
 
 Current position: **Phase 0 complete; Phase 1 is next** (see PROJECT_STATUS.md).

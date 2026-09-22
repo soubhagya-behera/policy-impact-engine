@@ -1028,6 +1028,50 @@ retention, anchoring, scheduling, login-failure auditing, new
 event types, export/search remain deferred; no migration, no new
 infrastructure; documented in ARCHITECTURE.md §26/§28/§31.
 
+Phase 12 slice implemented and tested successfully
+(optional local-AI explanation layer; see DECISIONS.md ADR-024 —
+ADR-002/006/022/023 unchanged):
+- New `ai` module above the deterministic pipeline (nothing below
+imports it): Spring-free `AiExplanationProvider` +
+`ExplanationRequest` (frozen allowlist, single-sourced
+`promptText()`) + `ExplanationOutcome` + shared `FallbackReason`
++ pure `DeterministicExplanationFallback` + JDK-`HttpClient`
+`OllamaExplanationProvider` (`POST {base}/api/chat`,
+`stream:false`, temperature 0, 2s connect / 30s request
+timeouts, pre-call 4000-char budget, response-size safety cap,
+typed failures only, never logs bodies)
+- `AiProperties` (`ai.*`, safe default `ai.enabled=false`) +
+`AiConfiguration` (fail-fast validation only when enabled;
+disabled bean never performs I/O); `AiExplanationService`
+(non-transactional orchestration reusing existing user-scoped
+assessment/recommendation/policy/concept reads; provider
+invoked only when enabled and within budget; authoritative
+score/band/actions echoed from persisted facts)
+- `POST /api/v1/me/impact-assessments/{id}/explanation` → 200
+with `ExplanationResponse` (assessmentId, explanation,
+aggregateScore/Band, actionKinds, model, fallback,
+fallbackReason); principal-only identity, foreign id → 404,
+malformed id → existing 400; ephemeral prose, no
+persistence/cache/audit/verification change
+- `ExplanationRequestTest` (prompt golden + allowlist scan) +
+`DeterministicExplanationFallbackTest` (3 golden shapes) +
+`OllamaExplanationProviderTest` (11 local-`HttpServer` tests:
+success/request shape, refused/timeout/non-2xx/malformed/
+missing/non-textual/empty/oversized/over-budget-no-call) +
+`AiExplanationServiceTest` (7 stub-provider tests incl. lying-
+prose passthrough, all five failure mappings,
+disabled/over-budget short-circuits, 404 propagation) +
+`ExplanationControllerTest` (5 slice tests) +
+`ExplanationIntegrationTest` (7 filters-enabled tests with stub
+provider: happy path, allowlist capture, isolation, 401s,
+read-only proof, disabled fallback, leak scan); no real Ollama
+or network in `./mvnw test`
+- Deferred: streaming, chat, cloud providers, persistence/
+caching, background generation, evidence quotes, per-
+recommendation endpoints, explanation audit events, Phase 13
+rate limiting/Actuator/Docker/pagination; no migration, no new
+dependency; documented in ARCHITECTURE.md §7/§12/§28/§30/§31.
+
 ## Next Action
 
 The next implementation task is the next approved slice
