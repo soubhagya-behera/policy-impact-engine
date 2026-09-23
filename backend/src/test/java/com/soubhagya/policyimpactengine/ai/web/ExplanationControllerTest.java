@@ -53,6 +53,11 @@ class ExplanationControllerTest {
 	@MockitoBean
 	private JwtAuthenticationFilter jwtAuthenticationFilter;
 
+	// Phase 13-C: satisfies SecurityConfig wiring in this slice. Filters
+	// stay disabled, so the mock never executes.
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.common.ratelimit.web.RateLimitFilter rateLimitFilter;
+
 	private UUID userId;
 	private Authentication authentication;
 

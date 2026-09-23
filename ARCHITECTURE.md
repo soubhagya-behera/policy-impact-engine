@@ -386,6 +386,7 @@ Security spans two distinct concerns: protecting the API and its users, and prot
 - **Existence-leak avoidance.** Cross-user resource access returns 404 rather than 403, so responses do not reveal whether a resource with a given identifier exists for another user.
 - **CSRF considerations.** CSRF protection is disabled for the stateless token API (no cookie-based sessions); this decision is documented and revisited if cookie-based auth is ever introduced.
 - **Secrets handling.** Credentials and secrets live only in the Git-ignored local configuration or environment variables; the committed template contains placeholders only.
+- **Rate limiting (IMPLEMENTED, Phase 13-C).** In-process token buckets enforced by `RateLimitFilter` after JWT authentication: each auth endpoint per client IP (10/min each), the explanation endpoint per user (10/min), the general API per user (600/min), anonymous requests per IP (60/min). Over-limit callers receive 429 `application/problem+json` with `Retry-After`; no Redis or external state. See DECISIONS.md ADR-025.
 
 ### SSRF protection for user-supplied policy URLs (architectural requirement)
 
@@ -438,6 +439,7 @@ API conventions:
 - **Error handling.** Errors follow **RFC 7807** (`application/problem+json`) via a single global exception handler: a stable problem type, a human-readable detail, and an accurate status code.
 - **Thin controllers.** Controllers parse input, delegate to an application service, and map the result; no business logic lives in the web layer.
 - **User-scoped by default.** Every `me/*` and user-owned resource is resolved against the authenticated principal; identifiers never bypass ownership checks.
+- **Throttling.** Over-limit callers receive 429 `application/problem+json` with a `Retry-After` header (Phase 13-C, ADR-025); authentication (401) and input validation (400) are decided before/at their own layers and are never converted into 429s.
 
 ## 29. Testing Architecture
 

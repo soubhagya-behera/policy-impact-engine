@@ -606,3 +606,33 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - OFFSET depth and per-row lazy-load costs remain known, documented limitations owned by future slices (cursor pagination, 13-F), not hidden redesigns inside 13-B.
 - Any broadening (envelopes, totals, cursors, larger maxima, new paginated endpoints) requires its own decision; this ADR is a ceiling, not a floor.
 
+---
+
+## ADR-025 — Application Rate Limiting (Phase 13-C)
+
+**Status:** Accepted (as the binding contract for the Phase 13-C implementation; written before code per the project workflow)
+
+**Context:** Every HTTP endpoint is currently unthrottled. The public `POST /api/v1/auth/register` and `POST /api/v1/auth/login` endpoints are brute-forceable (ADR-022 §8 deferred brute-force protection to rate limiting), the `POST /api/v1/me/impact-assessments/{id}/explanation` endpoint triggers costly Ollama inference (ADR-024 §18 names rate limiting as its Phase 13 cover), and the authenticated feeds have no abuse bound. The project forbids Redis, Kafka, and external infrastructure without explicit approval (DEVELOPMENT.md rule 2), and the deployment model is a single modular monolith (ADR-001), so the limiter must be in-process with no new dependencies.
+
+**Decision:**
+
+1. Scope is HTTP request throttling only: three request tiers plus an anonymous tier, all enforced by a servlet filter. No scheduler, pipeline, audit, scoring, or domain change.
+2. Tiers (token bucket each; capacity equals the window maximum, sustained rate equals max/window):
+   - `auth-register` / `auth-login`: `POST /api/v1/auth/register` and `POST /api/v1/auth/login` respectively, each endpoint its own bucket keyed by client IP, **10 requests / 60s each**.
+   - `explanation`: `POST /api/v1/me/impact-assessments/{id}/explanation`, keyed by authenticated user id, **10 requests / 60s**.
+   - `api`: every other `/api/**` route, keyed by authenticated user id, **600 requests / 60s**.
+   - `anonymous`: any `/api/**` request with no principal (which then 401s downstream), keyed by client IP, **60 requests / 60s**.
+3. Keys are `tier:key` strings (`auth-register:203.0.113.7`, `auth-login:203.0.113.7`, `api:<user-uuid>`). IP means the actual remote address (`request.getRemoteAddr()`); `X-Forwarded-For` is ignored because no proxy configuration exists and trusting it would enable trivial spoofing. No identity is ever read from parameters or headers.
+4. The filter runs **after** `JwtAuthenticationFilter` and before authorization, so the principal is available for user keying while unauthenticated requests still reach their 401 unchanged. The filter counts requests but never validates input, so 400 behavior is preserved.
+5. Rejection is HTTP **429** with `Content-Type: application/problem+json`, a `Retry-After` response header (whole seconds until the next token, minimum 1), and an RFC 7807 body (`title: "Too Many Requests"`, detail naming the retry delay, no user/IP/limit internals). The filter writes the body with the project's Jackson `ObjectMapper`, matching the 401/403 rendering style. No `X-RateLimit-*` headers are emitted.
+6. State is in-memory only: a `ConcurrentHashMap` of per-key token buckets with per-bucket synchronized consume/refill (exact counting under same-key races), refilled from the injected application `Clock` (fixed/sequenced in tests). Growth is bounded: idle entries past the configured TTL are evicted lazily, and when tracked keys exceed `max-tracked-keys` a purge pass drops idle entries, then oldest-accessed ones if still over cap.
+7. Configuration lives under `rate-limit.*` with safe production defaults (`enabled=true` kill-switch for incident response; per-tier windows/maxima exactly as in §2; `max-tracked-keys=100000`; `idle-ttl=PT10M`). Non-positive values fail fast at startup.
+8. Server-side work (scheduler ticks, stale sweeps, fan-out, audit appends) never traverses the filter and is unaffected by throttling. A restart resets buckets; the limit converges again within one window.
+
+**Consequences:**
+
+- Brute-force login/register probing and explanation-cost abuse are volume-bounded; feed scraping has a generous but finite ceiling; unauthenticated floods are bounded without changing any 401.
+- Limits are per-instance: a multi-instance deployment would multiply the nominal ceiling. Accepted under ADR-001 (single deployable); shared-state limiting would need Redis and its own decision.
+- NAT egress sharing means one IP's bad actors can consume the auth/anonymous budget of neighbors; the chosen limits keep normal use far below the ceiling, and the kill-switch covers incidents. No per-IP allowlist exists in v1.
+- Any broadening (new tiers, higher limits, quota headers, proxy-aware keying, distributed state) requires its own decision; this ADR is a ceiling, not a floor.
+

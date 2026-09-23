@@ -56,6 +56,11 @@ class AuthControllerTest {
 	@MockitoBean
 	private JwtAuthenticationFilter jwtAuthenticationFilter;
 
+	// Phase 13-C: satisfies SecurityConfig wiring in this slice. Filters
+	// stay disabled, so the mock never executes.
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.common.ratelimit.web.RateLimitFilter rateLimitFilter;
+
 	@Test
 	void registerReturnsCreatedResponseWithIdAndEmailOnly() throws Exception {
 		UUID id = UUID.randomUUID();

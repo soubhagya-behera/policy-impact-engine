@@ -1148,7 +1148,41 @@ ARCHITECTURE.md §28 and ADR-026 (one-word duplicate-param
 correction) — no other ADR change; V1–V18 untouched; no
 rate limiting/Actuator/Docker/cursor work.
 
+Phase 13-C slice implemented and tested successfully
+(application rate limiting per DECISIONS.md ADR-025):
+- New `common.ratelimit` module (no upward dependencies): `RateLimitProperties`
+(`rate-limit.*` with ADR-025 defaults and fail-fast validation),
+`TokenBucket` (pure Spring-free token bucket over the injected `Clock`),
+`RateLimitService` (per-key buckets namespaced `tier:value` with idle
+eviction plus oldest-drop under `max-tracked-keys`), and
+`common.ratelimit.web.RateLimitFilter` (after `JwtAuthenticationFilter`;
+auth routes by IP at 10/min, explanation per user at 10/min, general
+API per user at 600/min, anonymous per IP at 60/min; 429
+`application/problem+json` with `Retry-After`, no `X-RateLimit-*`
+headers, `X-Forwarded-For` ignored, `enabled=false` pass-through;
+non-API paths untouched; scheduler/fan-out/audit never traverse it).
+- `SecurityConfig` registers the filter after the JWT filter; 401/400
+behavior preserved (principal and input validation run before/at
+their own layers). No new dependency, no migration (V1–V18
+untouched), no pipeline/scoring changes.
+- Tests: `TokenBucketTest` (capacity/refill/retry math/clock skew),
+`RateLimitServiceTest` (tiers, keying, refill, idle+bounded
+eviction, 10-thread exactness, validation), `RateLimitFilterTest`
+(routing, 429 shape, anonymous/disabled/non-API paths),
+`RateLimitApiIntegrationTest` + `RateLimitAuthIntegrationTest`
+(filters-enabled, shrunken budgets, per-test IPs for the shared
+auth bucket, per-user isolation, tier separation, 401 precedence,
+no-credential-leak body check). The shared test profile disables
+the limiter (`rate-limit.enabled=false` in test resources) so
+unrelated suites never contend for budgets; only the two dedicated
+classes re-enable it.
+- `./mvnw.cmd clean test`: 983 tests passing (951 pre-13-C + 32 new),
+0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies all
+18 migrations in Testcontainers); documented in ADR-025,
+ARCHITECTURE.md §27/§28, and `application-example.properties` —
+no other ADR change; no Actuator/Docker/N+1/cursor work.
+
 The next implementation task is the next approved Phase 13 slice
-(13-C rate limiting, 13-D Actuator, or 13-E Docker),
+(13-D Actuator or 13-E Docker),
 as scoped in the approved Phase 13 plan.
 Wait for explicit instruction before beginning the next slice.
