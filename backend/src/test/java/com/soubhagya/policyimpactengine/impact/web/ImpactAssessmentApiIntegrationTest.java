@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -292,6 +293,99 @@ class ImpactAssessmentApiIntegrationTest extends AssessmentRecommendationApiFixt
 				.andExpect(status().isBadRequest())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 				.andExpect(jsonPath("$.title").value("Malformed request"));
+	}
+
+	@Test
+	void defaultPageIsCappedAtTwenty() throws Exception {
+		String token = registerAndLogin("assess-page-cap@example.com");
+		User user = userFor("assess-page-cap@example.com");
+		for (int i = 0; i < 25; i++) {
+			craftAssessment(user, "LOCATION", "MODIFIED", 40 + (i % 50), ImpactBand.MEDIUM);
+		}
+
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andExpect(jsonPath("$.length()").value(20));
+	}
+
+	@Test
+	void pagesAssembleToFullOrderingWithEmptyBeyondLastPage() throws Exception {
+		String token = registerAndLogin("assess-page-walk@example.com");
+		User user = userFor("assess-page-walk@example.com");
+		for (int i = 0; i < 25; i++) {
+			craftAssessment(user, "LOCATION", "MODIFIED", 40 + (i % 50), ImpactBand.MEDIUM);
+		}
+
+		List<String> full = assessmentIdsOnPage(token, 0, 100);
+		assertThat(full).hasSize(25);
+
+		List<String> walked = new ArrayList<>();
+		walked.addAll(assessmentIdsOnPage(token, 0, 10));
+		walked.addAll(assessmentIdsOnPage(token, 1, 10));
+		walked.addAll(assessmentIdsOnPage(token, 2, 10));
+		assertThat(walked).containsExactlyElementsOf(full);
+		assertThat(assessmentIdsOnPage(token, 3, 10)).isEmpty();
+
+		MvcResult result = mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("page", "0")
+						.queryParam("size", "10")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andReturn();
+		assertSortedNewestFirst(objectMapper.readTree(
+				result.getResponse().getContentAsString()));
+	}
+
+	@Test
+	void invalidPaginationReturns400Problem() throws Exception {
+		String token = registerAndLogin("assess-page-bad@example.com");
+
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("size", "101")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("page", "-1")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("size", "zero")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Malformed request"));
+	}
+
+	@Test
+	void unauthenticatedPaginationWithInvalidParamsReturns401() throws Exception {
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("page", "-1")
+						.queryParam("size", "500"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+	}
+
+	private List<String> assessmentIdsOnPage(String token, int page, int size)
+			throws Exception {
+		MvcResult result = mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("page", String.valueOf(page))
+						.queryParam("size", String.valueOf(size))
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andReturn();
+		List<String> ids = new ArrayList<>();
+		for (JsonNode row : objectMapper.readTree(
+				result.getResponse().getContentAsString())) {
+			ids.add(row.get("id").asText());
+		}
+		return ids;
 	}
 
 }

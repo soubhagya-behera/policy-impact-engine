@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Pageable;
 
 /**
  * Phase 2R — persistence for {@link Recommendation}.
@@ -30,6 +31,15 @@ public interface RecommendationRepository extends JpaRepository<Recommendation, 
 	 * share a timestamp.
 	 */
 	List<Recommendation> findByAssessment_User_IdOrderByCreatedAtDescIdDesc(UUID userId);
+
+	/**
+	 * Phase 13-B — paginated user-scoped listing. No ordering is
+	 * embedded in the name: the caller supplies the exact deterministic
+	 * Sort (createdAt DESC, id DESC) through the Pageable. Ownership is
+	 * still derived through the assessment; returns a bare list
+	 * (limit/offset only, no count query).
+	 */
+	List<Recommendation> findByAssessment_User_Id(UUID userId, Pageable pageable);
 
 	/**
 	 * User-scoped identity lookup for the authenticated read API.

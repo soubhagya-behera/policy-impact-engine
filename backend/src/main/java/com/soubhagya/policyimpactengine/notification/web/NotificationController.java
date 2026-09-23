@@ -8,8 +8,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.notification.application.NotificationService;
 import com.soubhagya.policyimpactengine.notification.web.dto.NotificationResponse;
 import com.soubhagya.policyimpactengine.user.web.AuthenticatedUsers;
@@ -39,16 +41,29 @@ public class NotificationController {
 		this.service = service;
 	}
 
+	/**
+	 * Phase 13-B — paginated notification feeds (ADR-026): bare JSON
+	 * arrays, newest first with the approved id tie-break, windowed by
+	 * {@code page}/{@code size} (defaults 0/20, maximum 100). The
+	 * principal is resolved before pagination is validated so
+	 * unauthenticated callers stay 401.
+	 */
 	@GetMapping
-	public List<NotificationResponse> list(Authentication authentication) {
+	public List<NotificationResponse> list(Authentication authentication,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
-		return service.listNotificationResponses(userId);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return service.listNotificationResponsesPaged(userId, pagination.page(), pagination.size());
 	}
 
 	@GetMapping("/unread")
-	public List<NotificationResponse> listUnread(Authentication authentication) {
+	public List<NotificationResponse> listUnread(Authentication authentication,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
-		return service.listUnreadNotificationResponses(userId);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return service.listUnreadNotificationResponsesPaged(userId, pagination.page(), pagination.size());
 	}
 
 	@PostMapping("/{notificationId}/read")

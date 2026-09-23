@@ -307,6 +307,84 @@ class AuditEventFeedIntegrationTest {
 				.andReturn().getResponse().getContentAsString();
 	}
 
+	@Test
+	void defaultPageIsCappedAtTwenty() throws Exception {
+		String token = registerAndLogin("page-cap@example.com");
+		for (int i = 0; i < 22; i++) {
+			registerPolicy(token, "Paged " + i, "https://paged.example/" + i);
+		}
+
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(20));
+	}
+
+	@Test
+	void pagesAssembleToFullNewestFirstOrdering() throws Exception {
+		String token = registerAndLogin("page-walk@example.com");
+		for (int i = 0; i < 22; i++) {
+			registerPolicy(token, "Paged " + i, "https://paged.example/" + i);
+		}
+
+		List<String> full = idsIn(feed(token, 0, 100));
+		assertThat(full).hasSize(24);
+
+		List<String> walked = new ArrayList<>();
+		walked.addAll(idsIn(feed(token, 0, 10)));
+		walked.addAll(idsIn(feed(token, 1, 10)));
+		walked.addAll(idsIn(feed(token, 2, 10)));
+		assertThat(walked).containsExactlyElementsOf(full);
+		assertThat(idsIn(feed(token, 3, 10))).isEmpty();
+
+		List<String> occurred = occurredIn(feed(token, 0, 100));
+		for (int i = 1; i < occurred.size(); i++) {
+			assertThat(occurred.get(i - 1).compareTo(occurred.get(i))).isGreaterThanOrEqualTo(0);
+		}
+	}
+
+	@Test
+	void invalidPaginationReturns400Problem() throws Exception {
+		String token = registerAndLogin("page-bad@example.com");
+
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("size", "101")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("page", "-1")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("size", "huge")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Malformed request"));
+	}
+
+	@Test
+	void unauthenticatedPaginationWithInvalidParamsReturns401() throws Exception {
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("page", "-1")
+						.queryParam("size", "500"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+	}
+
+	private String feed(String token, int page, int size) throws Exception {
+		return mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("page", String.valueOf(page))
+						.queryParam("size", String.valueOf(size))
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+	}
+
 	private String registerAndLogin(String email) throws Exception {
 		mockMvc.perform(post("/api/v1/auth/register")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -367,6 +445,14 @@ class AuditEventFeedIntegrationTest {
 			ids.add(item.get("id").asText());
 		}
 		return ids;
+	}
+
+	private List<String> occurredIn(String body) throws Exception {
+		List<String> instants = new ArrayList<>();
+		for (JsonNode item : objectMapper.readTree(body)) {
+			instants.add(item.get("occurredAt").asText());
+		}
+		return instants;
 	}
 
 	private List<String> policyIdsIn(String body) throws Exception {

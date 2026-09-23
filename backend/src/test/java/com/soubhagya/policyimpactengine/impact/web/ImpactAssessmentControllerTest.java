@@ -75,7 +75,7 @@ class ImpactAssessmentControllerTest {
 	@Test
 	void listDelegatesWithPrincipalUuid() throws Exception {
 		ImpactAssessmentSummaryResponse response = sampleSummary();
-		when(service.listAssessmentSummaries(userId)).thenReturn(List.of(response));
+		when(service.listAssessmentSummariesPaged(userId, 0, 20)).thenReturn(List.of(response));
 
 		mockMvc.perform(get("/api/v1/me/impact-assessments").principal(authentication))
 				.andExpect(status().isOk())
@@ -88,7 +88,7 @@ class ImpactAssessmentControllerTest {
 				.andExpect(jsonPath("$[0].aggregateScore").value(80))
 				.andExpect(jsonPath("$[0].aggregateBand").value("HIGH"));
 
-		verify(service).listAssessmentSummaries(userId);
+		verify(service).listAssessmentSummariesPaged(userId, 0, 20);
 	}
 
 	@Test
@@ -111,7 +111,7 @@ class ImpactAssessmentControllerTest {
 
 	@Test
 	void listContainsSummariesOnlyWithoutBreakdowns() throws Exception {
-		when(service.listAssessmentSummaries(userId)).thenReturn(List.of(sampleSummary()));
+		when(service.listAssessmentSummariesPaged(userId, 0, 20)).thenReturn(List.of(sampleSummary()));
 
 		mockMvc.perform(get("/api/v1/me/impact-assessments").principal(authentication))
 				.andExpect(status().isOk())
@@ -164,7 +164,7 @@ class ImpactAssessmentControllerTest {
 		UUID foreignId = UUID.randomUUID();
 		ImpactAssessmentSummaryResponse summary = sampleSummary();
 		ImpactAssessmentDetailResponse detail = sampleDetail();
-		when(service.listAssessmentSummaries(userId)).thenReturn(List.of(summary));
+		when(service.listAssessmentSummariesPaged(userId, 0, 20)).thenReturn(List.of(summary));
 		when(service.getAssessmentDetail(userId, detail.id())).thenReturn(detail);
 
 		mockMvc.perform(get("/api/v1/me/impact-assessments")
@@ -179,8 +179,87 @@ class ImpactAssessmentControllerTest {
 						.principal(authentication))
 				.andExpect(status().isOk());
 
-		verify(service).listAssessmentSummaries(userId);
+		verify(service).listAssessmentSummariesPaged(userId, 0, 20);
 		verify(service).getAssessmentDetail(userId, detail.id());
+	}
+
+	@Test
+	void listDefaultsToFirstPageOfTwenty() throws Exception {
+		ImpactAssessmentSummaryResponse response = sampleSummary();
+		when(service.listAssessmentSummariesPaged(userId, 0, 20))
+				.thenReturn(List.of(response));
+
+		mockMvc.perform(get("/api/v1/me/impact-assessments").principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].id").value(response.id().toString()));
+
+		verify(service).listAssessmentSummariesPaged(userId, 0, 20);
+	}
+
+	@Test
+	void listAcceptsExplicitPageAndSize() throws Exception {
+		ImpactAssessmentSummaryResponse response = sampleSummary();
+		when(service.listAssessmentSummariesPaged(userId, 3, 7))
+				.thenReturn(List.of(response));
+
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("page", "3")
+						.queryParam("size", "7")
+						.principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1));
+
+		verify(service).listAssessmentSummariesPaged(userId, 3, 7);
+	}
+
+	@Test
+	void listRejectsSizeAboveMaximumZeroSizeAndNegativePage() throws Exception {
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("size", "101")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("size", "0")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("page", "-1")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void listRejectsMalformedPageWithNeutralMessage() throws Exception {
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("page", "first")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Malformed request"))
+				.andExpect(jsonPath("$.detail").value("Invalid value for 'page'"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void unauthenticatedListWithInvalidPaginationReturns401() throws Exception {
+		mockMvc.perform(get("/api/v1/me/impact-assessments")
+						.queryParam("page", "-1")
+						.queryParam("size", "500"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		verifyNoInteractions(service);
 	}
 
 	private ImpactAssessmentSummaryResponse sampleSummary() {

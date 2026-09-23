@@ -11,11 +11,13 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.soubhagya.policyimpactengine.audit.application.AuditService;
 import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
 import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
 import com.soubhagya.policyimpactengine.policy.web.dto.CreatePolicyRequest;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
@@ -63,10 +65,20 @@ public class PolicyController {
 		return ResponseEntity.created(location).body(response);
 	}
 
+	/**
+	 * Phase 13-B — paginated owner-scoped listing (ADR-026): bare JSON
+	 * array, registration order, windowed by {@code page}/{@code size}
+	 * (defaults 0/20, maximum 100). Identity still comes only from the
+	 * principal; the principal is resolved before pagination is
+	 * validated so unauthenticated callers stay 401.
+	 */
 	@GetMapping
-	public List<PolicyResponse> list(Authentication authentication) {
+	public List<PolicyResponse> list(Authentication authentication,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
-		return service.list(userId);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return service.listPaged(userId, pagination.page(), pagination.size());
 	}
 
 	@GetMapping("/{id}")

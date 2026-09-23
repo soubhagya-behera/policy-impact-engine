@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 
 /**
@@ -50,6 +51,14 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
 	}
 
 	List<AuditEvent> findByActorUser_IdOrderByOccurredAtDescIdDesc(UUID actorUserId);
+
+	/**
+	 * Phase 13-B — paginated actor-scoped feed. No ordering is embedded
+	 * in the name: the caller supplies the exact deterministic Sort
+	 * (occurredAt DESC, id DESC) through the Pageable. Returns a bare
+	 * list (limit/offset only, no count query).
+	 */
+	List<AuditEvent> findByActorUser_Id(UUID actorUserId, Pageable pageable);
 
 	/**
 	 * Returns one scalar snapshot per audit row for chain

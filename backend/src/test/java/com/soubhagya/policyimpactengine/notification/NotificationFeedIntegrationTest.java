@@ -11,7 +11,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -345,6 +348,153 @@ class NotificationFeedIntegrationTest {
 
 	private Set<String> fieldNames(tools.jackson.databind.JsonNode node) {
 		return new HashSet<>(node.propertyNames());
+	}
+
+	@Test
+	void defaultPageIsCappedAtTwentyNewestFirst() throws Exception {
+		String token = registerAndLogin("page-cap@example.com");
+		User user = userFor("page-cap@example.com");
+		for (int i = 0; i < 25; i++) {
+			craftNotification(user, OLDER.plusSeconds(i * 60L));
+		}
+
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andExpect(jsonPath("$.length()").value(20));
+	}
+
+	@Test
+	void pagesAssembleToFullOrderingWithEmptyBeyondLastPage() throws Exception {
+		String token = registerAndLogin("page-walk@example.com");
+		User user = userFor("page-walk@example.com");
+		for (int i = 0; i < 25; i++) {
+			craftNotification(user, OLDER.plusSeconds(i * 60L));
+		}
+
+		List<String> full = idsOnPage(token, "/api/v1/me/notifications", 0, 100);
+		assertThat(full).hasSize(25);
+
+		List<String> walked = new ArrayList<>();
+		walked.addAll(idsOnPage(token, "/api/v1/me/notifications", 0, 10));
+		walked.addAll(idsOnPage(token, "/api/v1/me/notifications", 1, 10));
+		walked.addAll(idsOnPage(token, "/api/v1/me/notifications", 2, 10));
+		assertThat(walked).containsExactlyElementsOf(full);
+		assertThat(idsOnPage(token, "/api/v1/me/notifications", 3, 10)).isEmpty();
+
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("page", "3")
+						.queryParam("size", "10")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andExpect(jsonPath("$.length()").value(0));
+	}
+
+	@Test
+	void equalTimestampsOrderByIdDescendingAcrossPages() throws Exception {
+		String token = registerAndLogin("page-tie@example.com");
+		User user = userFor("page-tie@example.com");
+		List<String> craftedIds = new ArrayList<>();
+		for (int i = 0; i < 3; i++) {
+			craftedIds.add(craftNotification(user, OLDER).notification().getId().toString());
+		}
+		List<String> expected = new ArrayList<>(craftedIds.stream().sorted().toList());
+		Collections.reverse(expected);
+
+		assertThat(idsOnPage(token, "/api/v1/me/notifications", 0, 2))
+				.containsExactly(expected.get(0), expected.get(1));
+		assertThat(idsOnPage(token, "/api/v1/me/notifications", 1, 2))
+				.containsExactly(expected.get(2));
+		assertThat(idsOnPage(token, "/api/v1/me/notifications/unread", 0, 2))
+				.containsExactly(expected.get(0), expected.get(1));
+	}
+
+	@Test
+	void unreadFeedPagination() throws Exception {
+		String token = registerAndLogin("page-unread@example.com");
+		User user = userFor("page-unread@example.com");
+		List<Crafted> crafted = new ArrayList<>();
+		for (int i = 0; i < 5; i++) {
+			crafted.add(craftNotification(user, OLDER.plusSeconds(i * 60L)));
+		}
+		mockMvc.perform(post("/api/v1/me/notifications/{id}/read",
+								crafted.get(4).notification().getId())
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk());
+		mockMvc.perform(post("/api/v1/me/notifications/{id}/read",
+								crafted.get(3).notification().getId())
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk());
+
+		List<String> full = idsOnPage(token, "/api/v1/me/notifications/unread", 0, 100);
+		assertThat(full).hasSize(3);
+
+		List<String> walked = new ArrayList<>();
+		walked.addAll(idsOnPage(token, "/api/v1/me/notifications/unread", 0, 2));
+		walked.addAll(idsOnPage(token, "/api/v1/me/notifications/unread", 1, 2));
+		assertThat(walked).containsExactlyElementsOf(full);
+	}
+
+	@Test
+	void invalidPaginationReturns400Problem() throws Exception {
+		String token = registerAndLogin("page-bad@example.com");
+
+		for (String path : List.of("/api/v1/me/notifications",
+				"/api/v1/me/notifications/unread")) {
+			mockMvc.perform(get(path)
+							.queryParam("size", "101")
+							.header("Authorization", "Bearer " + token))
+					.andExpect(status().isBadRequest())
+					.andExpect(content().contentTypeCompatibleWith(
+							MediaType.APPLICATION_PROBLEM_JSON))
+					.andExpect(jsonPath("$.title").value("Invalid request"));
+
+			mockMvc.perform(get(path)
+							.queryParam("size", "0")
+							.header("Authorization", "Bearer " + token))
+					.andExpect(status().isBadRequest())
+					.andExpect(jsonPath("$.title").value("Invalid request"));
+
+			mockMvc.perform(get(path)
+							.queryParam("page", "-1")
+							.header("Authorization", "Bearer " + token))
+					.andExpect(status().isBadRequest())
+					.andExpect(jsonPath("$.title").value("Invalid request"));
+
+			mockMvc.perform(get(path)
+							.queryParam("page", "not-a-number")
+							.header("Authorization", "Bearer " + token))
+					.andExpect(status().isBadRequest())
+					.andExpect(jsonPath("$.title").value("Malformed request"));
+		}
+	}
+
+	@Test
+	void unauthenticatedPaginationWithInvalidParamsReturns401() throws Exception {
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("page", "-1")
+						.queryParam("size", "500"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+	}
+
+	private List<String> idsOnPage(String token, String path, int page, int size)
+			throws Exception {
+		MvcResult result = mockMvc.perform(get(path)
+						.queryParam("page", String.valueOf(page))
+						.queryParam("size", String.valueOf(size))
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andReturn();
+		List<String> ids = new ArrayList<>();
+		for (tools.jackson.databind.JsonNode row : objectMapper.readTree(
+				result.getResponse().getContentAsString())) {
+			ids.add(row.get("id").asText());
+		}
+		return ids;
 	}
 
 	private String wrongSignatureToken(UUID userId) {

@@ -5,6 +5,7 @@ import java.util.NoSuchElementException;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -12,6 +13,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.soubhagya.policyimpactengine.audit.application.AuditService;
 import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
 import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.policy.domain.Policy;
 import com.soubhagya.policyimpactengine.policy.domain.PolicyRepository;
 import com.soubhagya.policyimpactengine.policy.web.PolicyUrlValidator;
@@ -112,6 +114,26 @@ public class PolicyService {
 			throw new IllegalArgumentException("User id must not be null");
 		}
 		return repository.findByOwner_IdOrderByCreatedAtAscIdAsc(userId).stream()
+				.map(PolicyResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Phase 13-B — paginated owner-scoped policy listing (ADR-026).
+	 * Same rows and registration order as {@link #list(UUID)}, windowed
+	 * by {@code page}/{@code size} (defaults 0/20, maximum 100).
+	 * The Sort carries the exact listing order (createdAt ASC, id ASC)
+	 * so the repository method needs no embedded ordering. The existing
+	 * unbounded method stays for internal callers.
+	 */
+	@Transactional(readOnly = true)
+	public List<PolicyResponse> listPaged(UUID userId, int page, int size) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		FeedPagination pagination = FeedPagination.of(page, size);
+		Sort sort = Sort.by(Sort.Order.asc("createdAt"), Sort.Order.asc("id"));
+		return repository.findByOwner_Id(userId, pagination.pageRequest(sort)).stream()
 				.map(PolicyResponse::from)
 				.toList();
 	}

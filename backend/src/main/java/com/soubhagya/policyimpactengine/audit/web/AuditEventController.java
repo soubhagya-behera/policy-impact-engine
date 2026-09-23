@@ -6,10 +6,12 @@ import java.util.UUID;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.soubhagya.policyimpactengine.audit.application.AuditService;
 import com.soubhagya.policyimpactengine.audit.web.dto.AuditEventResponse;
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.user.web.AuthenticatedUsers;
 
 /**
@@ -37,10 +39,20 @@ public class AuditEventController {
 		this.service = service;
 	}
 
+	/**
+	 * Phase 13-B — paginated audit feed (ADR-026): bare JSON array,
+	 * newest first, windowed by {@code page}/{@code size} (defaults
+	 * 0/20, maximum 100). The principal is resolved before pagination
+	 * is validated so unauthenticated callers stay 401. Read-only:
+	 * listing emits nothing.
+	 */
 	@GetMapping
-	public List<AuditEventResponse> list(Authentication authentication) {
+	public List<AuditEventResponse> list(Authentication authentication,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
-		return service.listAuditEventResponses(userId);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return service.listAuditEventResponsesPaged(userId, pagination.page(), pagination.size());
 	}
 
 }

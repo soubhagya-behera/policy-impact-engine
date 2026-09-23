@@ -575,3 +575,34 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Hallucination blast radius is bounded by construction: numbers render from database fields, prose is labeled non-authoritative, and failures degrade to tested fallback text instead of errors.
 - Any future broadening (evidence quotes, persistence, streaming, cloud providers, background generation) requires its own explicit decision; this ADR is a ceiling, not a floor.
 
+---
+
+## ADR-026 — Feed Pagination Contract (Phase 13-B)
+
+**Status:** Accepted (as the binding contract for the Phase 13-B implementation; no pagination code lands before this record)**
+
+**Context:** The six user-facing listing feeds return unbounded `List<>` results: `GET /api/v1/policies`, `GET /api/v1/me/impact-assessments`, `GET /api/v1/me/recommendations`, `GET /api/v1/me/notifications`, `GET /api/v1/me/notifications/unread`, and `GET /api/v1/me/audit-events`. Earlier slices deferred pagination explicitly (10B-2B per-row lazy-load acceptance, ADR-019 §5, ADR-021 §10, Phase 11D, ADR-024 §18). Phase 13-A proved the V18 index baseline with EXPLAIN evidence and deliberately left recommendation/notification join-feed indexes out. Phase 13-B must therefore bound these feeds without changing their shape, ordering (except one approved refinement below), ownership, or transaction boundaries. (Numbering note: ADR-025 is reserved for the later rate-limiting decision; this record takes ADR-026 so the two do not collide.)
+
+**Decision:**
+
+1. Scope: pagination applies only to the six listing endpoints named above. The privacy-preference vocabulary, all detail-by-ID endpoints, assessment breakdowns, and every other non-listing endpoint are excluded.
+2. Response shape stays a bare JSON array. No pagination envelope is introduced in this phase.
+3. Query parameters are `page` (default `0`) and `size` (default `20`); maximum `size` is `100`. Missing parameters fall back to their defaults independently.
+4. Validation is explicit and fail-fast: `page < 0` → 400; `size < 1` → 400; `size > 100` → 400; malformed or overflowing numeric values → 400. Invalid sizes are rejected, never silently clamped. Duplicate query parameters follow Spring's existing first-value binding and are not rejected. All failures surface as RFC 7807 `application/problem+json` through the existing global handler.
+5. No `totalCount` is returned and no `COUNT(*)` is issued for pagination. Repository reads use limit/offset without a count query; clients paginate until an empty or short page.
+6. An empty or beyond-last page returns `200 []`, never 404.
+7. Authentication and ownership remain authoritative: unauthenticated requests stay 401 (decided before page validation), cross-user behavior is unchanged, and pagination parameters never carry identity. Ownership filtering stays at the repository level and read-only transaction/mapping boundaries are preserved.
+8. Ordering is preserved exactly, with one explicitly approved deterministic-pagination refinement: the two notification feeds order by `createdAt DESC, id DESC`. Previously they ordered by `createdAt` alone with no `id` tie-break; pagination requires a stable tie-breaker when `createdAt` values are equal, otherwise rows can duplicate or drop across page boundaries. All other feeds keep their existing order: policies `createdAt ASC, id ASC`; impact assessments `createdAt DESC, id DESC`; recommendations `createdAt DESC, id DESC`; audit events `occurredAt DESC, id DESC`.
+9. Pagination uses offset/page semantics (`LIMIT`/`OFFSET`). Keyset/cursor pagination is explicitly deferred; OFFSET deep-page cost is an accepted Phase 13 limitation and is not a reason to change the API inside 13-B.
+10. Existing unbounded internal read methods stay available for internal callers — notably `AiExplanationService`, which filters the full recommendation list by assessment in Java. Pagination must not silently truncate facts needed by internal application logic.
+11. No database migration is part of 13-B. V18 remains the index baseline; the recommendation/notification index experiments from planning are not adopted. A future index, if ever justified by fresh evidence, arrives as its own separated migration, never bundled silently.
+12. No N+1/fetch-graph optimization is part of 13-B. Phase 13-F stays conditional on the per-feed query-count measurements recorded during 13-B.
+13. Backward compatibility: calls without `page`/`size` keep working but now receive the default capped page of 20. This intentional behavior change is acceptable because the project currently has no external clients.
+
+**Consequences:**
+
+- Feeds become bounded (at most 100 rows per response) with no shape, ownership, or determinism regressions; the single notification tie-break addition is the only ordering change and is pinned by tests.
+- Internal logic (notably AI explanations) keeps exact facts while HTTP clients get pages; the two paths diverge by method, never by silent truncation.
+- OFFSET depth and per-row lazy-load costs remain known, documented limitations owned by future slices (cursor pagination, 13-F), not hidden redesigns inside 13-B.
+- Any broadening (envelopes, totals, cursors, larger maxima, new paginated endpoints) requires its own decision; this ADR is a ceiling, not a floor.
+

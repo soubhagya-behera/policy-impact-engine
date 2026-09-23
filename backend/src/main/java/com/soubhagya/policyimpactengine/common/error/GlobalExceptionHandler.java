@@ -65,7 +65,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	protected ResponseEntity<Object> handleTypeMismatch(
 			TypeMismatchException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
 		ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "Malformed request",
-				"Invalid value for path parameter '%s'".formatted(ex.getPropertyName()));
+				"Invalid value for '%s'".formatted(ex.getPropertyName()));
 		return handleExceptionInternal(ex, problem, headers, status, request);
 	}
 

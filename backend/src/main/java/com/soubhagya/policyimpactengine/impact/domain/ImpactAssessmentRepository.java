@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Pageable;
 
 /**
  * Phase 2Q — persistence for {@link ImpactAssessment}.
@@ -30,4 +31,12 @@ public interface ImpactAssessmentRepository extends JpaRepository<ImpactAssessme
 	 * deterministic even when two rows share a timestamp.
 	 */
 	List<ImpactAssessment> findByUser_IdOrderByCreatedAtDescIdDesc(UUID userId);
+
+	/**
+	 * Phase 13-B — paginated user-scoped listing. No ordering is
+	 * embedded in the name: the caller supplies the exact deterministic
+	 * Sort (createdAt DESC, id DESC) through the Pageable. Returns a
+	 * bare list (limit/offset only, no count query).
+	 */
+	List<ImpactAssessment> findByUser_Id(UUID userId, Pageable pageable);
 }

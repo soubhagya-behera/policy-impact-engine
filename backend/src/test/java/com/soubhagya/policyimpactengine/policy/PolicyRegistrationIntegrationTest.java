@@ -7,6 +7,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -248,5 +250,113 @@ class PolicyRegistrationIntegrationTest {
 			return "";
 		}
 		return json.substring(firstQuote + 1, secondQuote);
+	}
+
+	@Test
+	void defaultListPageIsCappedAtTwentyInRegistrationOrder() throws Exception {
+		String token = registerAndLogin("paged-owner@example.com");
+		for (int i = 0; i < 25; i++) {
+			registerPolicy(token, "Paged " + i, "https://paged.example/" + i);
+		}
+
+		MvcResult result = mockMvc.perform(get("/api/v1/policies")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+				.andExpect(jsonPath("$").isArray())
+				.andExpect(jsonPath("$.length()").value(20))
+				.andExpect(jsonPath("$[0].name").value("Paged 0"))
+				.andReturn();
+		assertThat(repository.count()).isEqualTo(25);
+		assertThat(result.getResponse().getContentAsString()).isNotBlank();
+	}
+
+	@Test
+	void policyPagesAssembleToFullRegistrationOrder() throws Exception {
+		String token = registerAndLogin("paged-walk@example.com");
+		for (int i = 0; i < 25; i++) {
+			registerPolicy(token, "Paged " + i, "https://paged.example/" + i);
+		}
+
+		List<String> full = policyNamesOnPage(token, 0, 100);
+		assertThat(full).hasSize(25);
+		for (int i = 0; i < 25; i++) {
+			assertThat(full.get(i)).isEqualTo("Paged " + i);
+		}
+
+		List<String> walked = new ArrayList<>();
+		walked.addAll(policyNamesOnPage(token, 0, 10));
+		walked.addAll(policyNamesOnPage(token, 1, 10));
+		walked.addAll(policyNamesOnPage(token, 2, 10));
+		assertThat(walked).containsExactlyElementsOf(full);
+		assertThat(policyNamesOnPage(token, 3, 10)).isEmpty();
+
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("page", "3")
+						.queryParam("size", "10")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andExpect(jsonPath("$.length()").value(0));
+	}
+
+	@Test
+	void invalidPolicyPaginationReturns400Problem() throws Exception {
+		String token = registerAndLogin("paged-bad@example.com");
+
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("size", "101")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("page", "-1")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("page", "first")
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Malformed request"));
+	}
+
+	@Test
+	void unauthenticatedPolicyPaginationWithInvalidParamsReturns401() throws Exception {
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("page", "-1")
+						.queryParam("size", "500"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+	}
+
+	private void registerPolicy(String token, String name, String url) throws Exception {
+		mockMvc.perform(post("/api/v1/policies")
+						.header("Authorization", "Bearer " + token)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"name":"%s","url":"%s"}
+								""".formatted(name, url)))
+				.andExpect(status().isCreated());
+	}
+
+	private List<String> policyNamesOnPage(String token, int page, int size)
+			throws Exception {
+		MvcResult result = mockMvc.perform(get("/api/v1/policies")
+						.queryParam("page", String.valueOf(page))
+						.queryParam("size", String.valueOf(size))
+						.header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andReturn();
+		List<String> names = new ArrayList<>();
+		for (tools.jackson.databind.JsonNode row : objectMapper.readTree(
+				result.getResponse().getContentAsString())) {
+			names.add(row.get("name").asText());
+		}
+		return names;
 	}
 }

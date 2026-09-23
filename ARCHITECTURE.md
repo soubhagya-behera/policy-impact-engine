@@ -405,7 +405,7 @@ All REST APIs are versioned under **`/api/v1`**. The following surface is PLANNE
 | Method | Path | Purpose | Phase |
 | --- | --- | --- | --- |
 | POST | `/api/v1/policies` | Register a policy (owner = authenticated user) | 1, owner-scoped (IMPLEMENTED) |
-| GET | `/api/v1/policies` | List the user's policies (owned only) | 1, owner-scoped (IMPLEMENTED) |
+| GET | `/api/v1/policies` | List the user's policies (owned only) | 1, owner-scoped (IMPLEMENTED); paginated per the feed convention below (13-B) |
 | GET | `/api/v1/policies/{id}` | Policy detail (owned only, foreign → 404) | 1, owner-scoped (IMPLEMENTED) |
 | DELETE | `/api/v1/policies/{id}` | Remove a policy | 1 |
 | POST | `/api/v1/policies/{id}/check` | Trigger a manual fetch/check | 2–3 |
@@ -416,18 +416,20 @@ All REST APIs are versioned under **`/api/v1`**. The following surface is PLANNE
 | GET / PUT | `/api/v1/me/privacy-preferences` | Read / bulk-update the privacy profile (full concept surface, merge semantics) | 6 (IMPLEMENTED) |
 | GET | `/api/v1/changes/{changeId}/assessment` | Scored assessment with breakdown | 6 |
 | GET | `/api/v1/me/impact-summary` | Pending-impact digest for the user | 6 |
-| GET | `/api/v1/me/impact-assessments` | Personal assessment summaries, newest first (no breakdowns) | Assessment/Recommendation REST (IMPLEMENTED) |
+| GET | `/api/v1/me/impact-assessments` | Personal assessment summaries, newest first (no breakdowns) | Assessment/Recommendation REST (IMPLEMENTED); paginated per the feed convention below (13-B) |
 | GET | `/api/v1/me/impact-assessments/{id}` | Assessment detail with ordered breakdown | Assessment/Recommendation REST (IMPLEMENTED) |
 | POST | `/api/v1/me/impact-assessments/{id}/explanation` | Optional advisory prose for one persisted assessment (deterministic fallback when AI disabled/unavailable; authoritative facts echoed from DB) | 12 (IMPLEMENTED, per ADR-024) |
-| GET | `/api/v1/me/recommendations` | Current pending recommendations | 7, Assessment/Recommendation REST (IMPLEMENTED) |
+| GET | `/api/v1/me/recommendations` | Current pending recommendations | 7, Assessment/Recommendation REST (IMPLEMENTED); paginated per the feed convention below (13-B) |
 | GET | `/api/v1/me/recommendations/{id}` | Recommendation detail with assessment context | Assessment/Recommendation REST (IMPLEMENTED) |
 | POST | `/api/v1/auth/register` | Account registration | 8 |
 | POST | `/api/v1/auth/login` | Authentication (access token only) | 8B |
 | POST | `/api/v1/auth/refresh` | Refresh the access token | 8C |
-| GET | `/api/v1/me/notifications` | In-app notification feed | 10B-2B (IMPLEMENTED) |
-| GET | `/api/v1/me/notifications/unread` | Unread notifications only | 10B-2B (IMPLEMENTED) |
+| GET | `/api/v1/me/notifications` | In-app notification feed | 10B-2B (IMPLEMENTED); paginated per the feed convention below (13-B) |
+| GET | `/api/v1/me/notifications/unread` | Unread notifications only | 10B-2B (IMPLEMENTED); paginated per the feed convention below (13-B) |
 | POST | `/api/v1/me/notifications/{id}/read` | Mark a notification read | 10B-2B (IMPLEMENTED) |
-| GET | `/api/v1/me/audit-events` | The user's audit trail | 11 (IMPLEMENTED, Phase 11D: self-scoped, newest-first, read-only) |
+| GET | `/api/v1/me/audit-events` | The user's audit trail | 11 (IMPLEMENTED, Phase 11D: self-scoped, newest-first, read-only); paginated per the feed convention below (13-B) |
+
+Feed pagination convention (IMPLEMENTED, Phase 13-B, see DECISIONS.md ADR-026): the six listing endpoints above accept `?page=` (default 0) and `?size=` (default 20, maximum 100) and return a bare JSON array with no envelope and no total count. Out-of-range values (`page < 0`, `size < 1`, `size > 100`) and malformed numerics are 400 `application/problem+json`; empty pages are `200 []`. Existing per-feed ordering is preserved, with the single approved refinement that both notification feeds order by `createdAt DESC, id DESC` (the id tie-break keeps pages deterministic across equal timestamps). OFFSET deep-page cost is an accepted limitation; keyset/cursor pagination is deferred.
 
 API conventions:
 

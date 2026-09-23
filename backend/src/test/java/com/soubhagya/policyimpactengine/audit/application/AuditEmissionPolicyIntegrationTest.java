@@ -121,7 +121,7 @@ class AuditEmissionPolicyIntegrationTest {
 				new CreatePolicyRequest("Acme", "https://example.com/privacy")).getBody();
 
 		policyController.getById(authentication(owner.getId()), created.id());
-		policyController.list(authentication(owner.getId()));
+		policyController.list(authentication(owner.getId()), 0, 20);
 
 		assertThat(countByType("POLICY_REGISTERED")).isEqualTo(1);
 		assertThat(auditEventRepository.count()).isEqualTo(1);

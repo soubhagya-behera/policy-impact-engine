@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -79,7 +80,7 @@ class AuditEventControllerTest {
 		UUID second = UUID.randomUUID();
 		UUID resource = UUID.randomUUID();
 		Instant at = Instant.parse("2026-09-18T10:00:00Z");
-		when(service.listAuditEventResponses(userId)).thenReturn(List.of(
+		when(service.listAuditEventResponsesPaged(userId, 0, 20)).thenReturn(List.of(
 				new AuditEventResponse(first, at, "AUTH_USER_REGISTERED", "USER", resource,
 						"{}", null, "a".repeat(64)),
 				new AuditEventResponse(second, at, "AUTH_LOGIN_SUCCEEDED", null, null,
@@ -102,23 +103,23 @@ class AuditEventControllerTest {
 				.andExpect(jsonPath("$[1].actorUserId").doesNotExist())
 				.andExpect(jsonPath("$[1].actor_user_id").doesNotExist());
 
-		verify(service).listAuditEventResponses(userId);
+		verify(service).listAuditEventResponsesPaged(userId, 0, 20);
 	}
 
 	@Test
 	void emptyFeedReturnsEmptyArray() throws Exception {
-		when(service.listAuditEventResponses(userId)).thenReturn(List.of());
+		when(service.listAuditEventResponsesPaged(userId, 0, 20)).thenReturn(List.of());
 
 		mockMvc.perform(get("/api/v1/me/audit-events").principal(authentication))
 				.andExpect(status().isOk())
 				.andExpect(content().json("[]"));
 
-		verify(service).listAuditEventResponses(userId);
+		verify(service).listAuditEventResponsesPaged(userId, 0, 20);
 	}
 
 	@Test
 	void queryUserIdCannotChangeOwnership() throws Exception {
-		when(service.listAuditEventResponses(userId)).thenReturn(List.of());
+		when(service.listAuditEventResponsesPaged(userId, 0, 20)).thenReturn(List.of());
 		UUID other = UUID.randomUUID();
 
 		mockMvc.perform(get("/api/v1/me/audit-events").queryParam("userId", other.toString())
@@ -126,12 +127,12 @@ class AuditEventControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(content().json("[]"));
 
-		verify(service).listAuditEventResponses(userId);
+		verify(service).listAuditEventResponsesPaged(userId, 0, 20);
 	}
 
 	@Test
 	void serviceFailurePropagatesAsProblem() throws Exception {
-		when(service.listAuditEventResponses(userId))
+		when(service.listAuditEventResponsesPaged(userId, 0, 20))
 				.thenThrow(new NoSuchElementException("gone"));
 
 		mockMvc.perform(get("/api/v1/me/audit-events").principal(authentication))
@@ -147,6 +148,90 @@ class AuditEventControllerTest {
 				.andExpect(status().isUnauthorized())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+	}
+
+	@Test
+	void listDefaultsToFirstPageOfTwenty() throws Exception {
+		when(service.listAuditEventResponsesPaged(userId, 0, 20))
+				.thenReturn(List.of(sampleAuditResponse()));
+
+		mockMvc.perform(get("/api/v1/me/audit-events").principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+				.andExpect(jsonPath("$.length()").value(1));
+
+		verify(service).listAuditEventResponsesPaged(userId, 0, 20);
+	}
+
+	@Test
+	void listAcceptsExplicitPageAndSize() throws Exception {
+		when(service.listAuditEventResponsesPaged(userId, 2, 5))
+				.thenReturn(List.of(sampleAuditResponse()));
+
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("page", "2")
+						.queryParam("size", "5")
+						.principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1));
+
+		verify(service).listAuditEventResponsesPaged(userId, 2, 5);
+	}
+
+	@Test
+	void listRejectsSizeAboveMaximumZeroSizeAndNegativePage() throws Exception {
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("size", "101")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("size", "0")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("page", "-1")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void listRejectsMalformedPageWithNeutralMessage() throws Exception {
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("page", "first")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Malformed request"))
+				.andExpect(jsonPath("$.detail").value("Invalid value for 'page'"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void unauthenticatedListWithInvalidPaginationReturns401() throws Exception {
+		SecurityContextHolder.clearContext();
+
+		mockMvc.perform(get("/api/v1/me/audit-events")
+						.queryParam("page", "-1")
+						.queryParam("size", "500"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		verifyNoInteractions(service);
+	}
+
+	private AuditEventResponse sampleAuditResponse() {
+		return new AuditEventResponse(UUID.randomUUID(),
+				Instant.parse("2026-09-18T10:00:00Z"), "AUTH_USER_REGISTERED", "USER",
+				UUID.randomUUID(), "{}", null, "a".repeat(64));
 	}
 
 	@Test

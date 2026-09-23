@@ -8,11 +8,13 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecord;
 import com.soubhagya.policyimpactengine.diff.domain.PolicyChangeRecordRepository;
 import com.soubhagya.policyimpactengine.impact.domain.ChangeImpact;
@@ -147,6 +149,27 @@ public class ImpactAssessmentService {
 			throw new IllegalArgumentException("User id must not be null");
 		}
 		return assessmentRepository.findByUser_IdOrderByCreatedAtDescIdDesc(userId).stream()
+				.map(ImpactAssessmentSummaryResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Phase 13-B — paginated assessment summaries (ADR-026). Same rows
+	 * and newest-first order as {@link #listAssessmentSummaries(UUID)},
+	 * windowed by {@code page}/{@code size} (defaults 0/20, maximum
+	 * 100). The Sort carries the exact listing order (createdAt DESC,
+	 * id DESC). Mapping stays inside this read transaction; the
+	 * existing unbounded method stays for internal callers.
+	 */
+	@Transactional(readOnly = true)
+	public List<ImpactAssessmentSummaryResponse> listAssessmentSummariesPaged(
+			UUID userId, int page, int size) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		FeedPagination pagination = FeedPagination.of(page, size);
+		Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+		return assessmentRepository.findByUser_Id(userId, pagination.pageRequest(sort)).stream()
 				.map(ImpactAssessmentSummaryResponse::from)
 				.toList();
 	}

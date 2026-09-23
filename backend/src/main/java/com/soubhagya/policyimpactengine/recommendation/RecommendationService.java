@@ -5,11 +5,13 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.impact.ImpactAssessmentService;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessment;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentBreakdown;
@@ -148,6 +150,31 @@ public class RecommendationService {
 			throw new IllegalArgumentException("User id must not be null");
 		}
 		return recommendationRepository.findByAssessment_User_IdOrderByCreatedAtDescIdDesc(userId)
+				.stream()
+				.map(RecommendationSummaryResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Phase 13-B — paginated recommendation listing (ADR-026). Same
+	 * rows and newest-first order as
+	 * {@link #listRecommendationResponses(UUID)}, windowed by
+	 * {@code page}/{@code size} (defaults 0/20, maximum 100). The Sort
+	 * carries the exact listing order (createdAt DESC, id DESC).
+	 * Ownership is still derived through the assessment at the
+	 * repository level. The existing unbounded method stays: internal
+	 * callers such as {@code AiExplanationService} need the complete
+	 * user-scoped set, which pagination must never silently truncate.
+	 */
+	@Transactional(readOnly = true)
+	public List<RecommendationSummaryResponse> listRecommendationResponsesPaged(
+			UUID userId, int page, int size) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		FeedPagination pagination = FeedPagination.of(page, size);
+		Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+		return recommendationRepository.findByAssessment_User_Id(userId, pagination.pageRequest(sort))
 				.stream()
 				.map(RecommendationSummaryResponse::from)
 				.toList();

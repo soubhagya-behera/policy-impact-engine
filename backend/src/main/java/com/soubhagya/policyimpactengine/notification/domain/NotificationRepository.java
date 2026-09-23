@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Pageable;
 
 /**
  * Phase 10A — persistence for {@link Notification}.
@@ -33,4 +34,22 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 	 * Returns the user's unread notifications, newest first.
 	 */
 	List<Notification> findByAssessment_User_IdAndReadAtIsNullOrderByCreatedAtDesc(UUID userId);
+
+	/**
+	 * Phase 13-B — paginated user-scoped listings. No ordering is
+	 * embedded in the names: callers supply the exact deterministic
+	 * Sort (createdAt DESC, id DESC — the id tie-break is the approved
+	 * ADR-026 refinement for stable pagination across equal
+	 * timestamps) through the Pageable. Ownership is still derived
+	 * through the assessment; both return bare lists (limit/offset
+	 * only, no count query).
+	 */
+	List<Notification> findByAssessment_User_Id(UUID userId, Pageable pageable);
+
+	/**
+	 * Phase 13-B — paginated unread listing; same contract as
+	 * {@link #findByAssessment_User_Id(UUID, Pageable)} plus the
+	 * unread predicate.
+	 */
+	List<Notification> findByAssessment_User_IdAndReadAtIsNull(UUID userId, Pageable pageable);
 }

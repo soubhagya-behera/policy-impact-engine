@@ -6,11 +6,13 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessment;
 import com.soubhagya.policyimpactengine.impact.domain.ImpactAssessmentRepository;
 import com.soubhagya.policyimpactengine.notification.domain.Notification;
@@ -174,9 +176,7 @@ public class NotificationService {
 		return listNotifications(userId).stream()
 				.map(NotificationResponse::from)
 				.toList();
-	}
-
-	/**
+	}	/**
 	 * Phase 10B-2B — controller-facing unread feed: delegates to
 	 * {@link #listUnreadNotifications(UUID)} and maps to DTOs inside
 	 * the same read transaction. No ownership or ordering logic is
@@ -185,6 +185,52 @@ public class NotificationService {
 	@Transactional(readOnly = true)
 	public List<NotificationResponse> listUnreadNotificationResponses(UUID userId) {
 		return listUnreadNotifications(userId).stream()
+				.map(NotificationResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Phase 13-B — paginated notification feeds (ADR-026). Same rows as
+	 * {@link #listNotificationResponses(UUID)} and
+	 * {@link #listUnreadNotificationResponses(UUID)}, windowed by
+	 * {@code page}/{@code size} (defaults 0/20, maximum 100). The Sort
+	 * carries the listing order (createdAt DESC, id DESC); the id
+	 * tie-break is the approved ADR-026 refinement — the pre-13-B
+	 * queries ordered by createdAt alone, which cannot paginate
+	 * deterministically across equal timestamps. Mapping stays inside
+	 * these read transactions; the existing unbounded methods stay for
+	 * internal callers.
+	 */
+	@Transactional(readOnly = true)
+	public List<NotificationResponse> listNotificationResponsesPaged(
+			UUID userId, int page, int size) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		FeedPagination pagination = FeedPagination.of(page, size);
+		Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+		return notificationRepository.findByAssessment_User_Id(userId, pagination.pageRequest(sort))
+				.stream()
+				.map(NotificationResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Phase 13-B — paginated unread feed; same contract as
+	 * {@link #listNotificationResponsesPaged(UUID, int, int)} plus the
+	 * unread predicate.
+	 */
+	@Transactional(readOnly = true)
+	public List<NotificationResponse> listUnreadNotificationResponsesPaged(
+			UUID userId, int page, int size) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		FeedPagination pagination = FeedPagination.of(page, size);
+		Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+		return notificationRepository
+				.findByAssessment_User_IdAndReadAtIsNull(userId, pagination.pageRequest(sort))
+				.stream()
 				.map(NotificationResponse::from)
 				.toList();
 	}

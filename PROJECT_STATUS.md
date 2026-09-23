@@ -1099,7 +1099,56 @@ removal would be destructive to V7-era objects).
 - `./mvnw.cmd clean test`: 890 tests passing, BUILD SUCCESS
 (Flyway validates/applies all 18 migrations in Testcontainers).
 
+Phase 13-B slice implemented and tested successfully
+(feed pagination per DECISIONS.md ADR-026; 13-A EXPLAIN follow-up
+included, no new migration):
+- Six listing endpoints accept `?page=` (default 0) / `?size=`
+(default 20, max 100) and return bare JSON arrays with no envelope
+and no totalCount: `GET /api/v1/policies`,
+`GET /api/v1/me/impact-assessments`,
+`GET /api/v1/me/recommendations`,
+`GET /api/v1/me/notifications`,
+`GET /api/v1/me/notifications/unread`,
+`GET /api/v1/me/audit-events`. Out-of-range values → 400
+`Invalid request` (rejected, never clamped); malformed/overflowing
+numerics → 400 `Malformed request` (type-mismatch message reworded
+from "path parameter" to neutral `Invalid value for 'page'` style);
+empty pages → `200 []`; principal resolved before pagination
+validation so unauthenticated calls stay 401; duplicate params use
+Spring first-value binding (ADR-026 corrected accordingly after a
+slice test proved last-value was misstated).
+- New `common.pagination.FeedPagination` value object
+(DEFAULT_PAGE/DEFAULT_SIZE/MAX_SIZE, explicit validation,
+PageRequest/Sort construction); controllers validate at the boundary
+then delegate to new `*Paged` service methods (existing
+`@Transactional(readOnly=true)` + in-transaction DTO mapping
+preserved); repositories gain `Pageable` overloads without embedded
+`OrderBy` (Sort carries the exact order); all unbounded methods kept
+— `AiExplanationService` still reads the complete user-scoped
+recommendation set.
+- Ordering preserved exactly except the approved notification
+refinement: both notification feeds now sort
+`createdAt DESC, id DESC` (previously createdAt only), proven by an
+equal-timestamp id-DESC page test. All other feeds byte-identical.
+- No V19: paginated EXPLAIN re-runs confirm V18 serves every
+single-table feed (`Limit → Index Only Scan`); rec/notification
+join feeds stay hash-join+sort under LIMIT (an ordering-only trial
+index flipped rec page-1 to a fragile sparse-user scan — evidence
+against adopting it). New `FeedPaginationIndexTest` guards the V18
+index definitions + schema version 18.
+- N+1 observations at size=20 (measured, not fixed — 13-F input):
+policies ~1 SELECT/page; assessments ~1+2N (41); recommendations ~1
+(proxy ids only); notifications ~1+N (21: one policy_version load
+per row, policy via uninitialized proxy id); audit ~1. No
+EntityGraph/fetch-join/EAGER change in 13-B.
+- `./mvnw.cmd clean test`: 951 tests passing (890 pre-13-B + 61 new),
+0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies all
+18 migrations in Testcontainers); documented in
+ARCHITECTURE.md §28 and ADR-026 (one-word duplicate-param
+correction) — no other ADR change; V1–V18 untouched; no
+rate limiting/Actuator/Docker/cursor work.
+
 The next implementation task is the next approved Phase 13 slice
-(13-B pagination, 13-C rate limiting, 13-D Actuator, or 13-E Docker),
+(13-C rate limiting, 13-D Actuator, or 13-E Docker),
 as scoped in the approved Phase 13 plan.
 Wait for explicit instruction before beginning the next slice.

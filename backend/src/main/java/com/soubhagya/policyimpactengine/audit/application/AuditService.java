@@ -7,11 +7,13 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.audit.domain.AuditChain;
 import com.soubhagya.policyimpactengine.audit.domain.AuditEvent;
 import com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository;
@@ -128,6 +130,29 @@ public class AuditService {
 			throw new IllegalArgumentException("User id must not be null");
 		}
 		return repository.findByActorUser_IdOrderByOccurredAtDescIdDesc(userId).stream()
+				.map(AuditEventResponse::from)
+				.toList();
+	}
+
+	/**
+	 * Phase 13-B — paginated audit feed (ADR-026). Same rows and
+	 * newest-first order as {@link #listAuditEventResponses(UUID)},
+	 * windowed by {@code page}/{@code size} (defaults 0/20, maximum
+	 * 100). The Sort carries the exact feed order (occurredAt DESC, id
+	 * DESC). Mapping stays inside this read transaction; only scalar
+	 * getters are read so the lazy actor association stays
+	 * uninitialized. The existing unbounded method stays for internal
+	 * callers.
+	 */
+	@Transactional(readOnly = true)
+	public List<AuditEventResponse> listAuditEventResponsesPaged(
+			UUID userId, int page, int size) {
+		if (userId == null) {
+			throw new IllegalArgumentException("User id must not be null");
+		}
+		FeedPagination pagination = FeedPagination.of(page, size);
+		Sort sort = Sort.by(Sort.Order.desc("occurredAt"), Sort.Order.desc("id"));
+		return repository.findByActorUser_Id(userId, pagination.pageRequest(sort)).stream()
 				.map(AuditEventResponse::from)
 				.toList();
 	}

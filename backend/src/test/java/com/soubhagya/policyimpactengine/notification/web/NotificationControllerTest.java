@@ -74,7 +74,7 @@ class NotificationControllerTest {
 	@Test
 	void listDelegatesWithPrincipalUuid() throws Exception {
 		NotificationResponse response = sampleResponse(false);
-		when(service.listNotificationResponses(userId)).thenReturn(List.of(response));
+		when(service.listNotificationResponsesPaged(userId, 0, 20)).thenReturn(List.of(response));
 
 		mockMvc.perform(get("/api/v1/me/notifications").principal(authentication))
 				.andExpect(status().isOk())
@@ -86,13 +86,13 @@ class NotificationControllerTest {
 				.andExpect(jsonPath("$[0].versionNumber").value(2))
 				.andExpect(jsonPath("$[0].read").value(false));
 
-		verify(service).listNotificationResponses(userId);
+		verify(service).listNotificationResponsesPaged(userId, 0, 20);
 	}
 
 	@Test
 	void listUnreadDelegatesWithPrincipalUuid() throws Exception {
 		NotificationResponse response = sampleResponse(false);
-		when(service.listUnreadNotificationResponses(userId)).thenReturn(List.of(response));
+		when(service.listUnreadNotificationResponsesPaged(userId, 0, 20)).thenReturn(List.of(response));
 
 		mockMvc.perform(get("/api/v1/me/notifications/unread").principal(authentication))
 				.andExpect(status().isOk())
@@ -100,7 +100,7 @@ class NotificationControllerTest {
 				.andExpect(jsonPath("$.length()").value(1))
 				.andExpect(jsonPath("$[0].id").value(response.id().toString()));
 
-		verify(service).listUnreadNotificationResponses(userId);
+		verify(service).listUnreadNotificationResponsesPaged(userId, 0, 20);
 	}
 
 	@Test
@@ -122,7 +122,7 @@ class NotificationControllerTest {
 	@Test
 	void responseContainsOnlyApprovedFields() throws Exception {
 		NotificationResponse response = sampleResponse(true);
-		when(service.listNotificationResponses(userId)).thenReturn(List.of(response));
+		when(service.listNotificationResponsesPaged(userId, 0, 20)).thenReturn(List.of(response));
 
 		mockMvc.perform(get("/api/v1/me/notifications").principal(authentication))
 				.andExpect(status().isOk())
@@ -172,8 +172,8 @@ class NotificationControllerTest {
 	void clientSuppliedUserIdCannotOverridePrincipal() throws Exception {
 		UUID foreignId = UUID.randomUUID();
 		NotificationResponse response = sampleResponse(false);
-		when(service.listNotificationResponses(userId)).thenReturn(List.of(response));
-		when(service.listUnreadNotificationResponses(userId)).thenReturn(List.of(response));
+		when(service.listNotificationResponsesPaged(userId, 0, 20)).thenReturn(List.of(response));
+		when(service.listUnreadNotificationResponsesPaged(userId, 0, 20)).thenReturn(List.of(response));
 		when(service.markReadResponse(userId, response.id())).thenReturn(response);
 
 		mockMvc.perform(get("/api/v1/me/notifications")
@@ -195,9 +195,152 @@ class NotificationControllerTest {
 						.principal(authentication))
 				.andExpect(status().isOk());
 
-		verify(service).listNotificationResponses(userId);
-		verify(service).listUnreadNotificationResponses(userId);
+		verify(service).listNotificationResponsesPaged(userId, 0, 20);
+		verify(service).listUnreadNotificationResponsesPaged(userId, 0, 20);
 		verify(service).markReadResponse(userId, response.id());
+	}
+
+	@Test
+	void listDefaultsToFirstPageOfTwenty() throws Exception {
+		NotificationResponse response = sampleResponse(false);
+		when(service.listNotificationResponsesPaged(userId, 0, 20))
+				.thenReturn(List.of(response));
+
+		mockMvc.perform(get("/api/v1/me/notifications").principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andExpect(jsonPath("$.length()").value(1));
+
+		verify(service).listNotificationResponsesPaged(userId, 0, 20);
+	}
+
+	@Test
+	void listAcceptsExplicitPageAndSize() throws Exception {
+		NotificationResponse response = sampleResponse(false);
+		when(service.listNotificationResponsesPaged(userId, 2, 5))
+				.thenReturn(List.of(response));
+
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("page", "2")
+						.queryParam("size", "5")
+						.principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1));
+
+		verify(service).listNotificationResponsesPaged(userId, 2, 5);
+	}
+
+	@Test
+	void listAcceptsMaximumSize() throws Exception {
+		when(service.listNotificationResponsesPaged(userId, 0, 100))
+				.thenReturn(List.of());
+
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("size", "100")
+						.principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(0));
+
+		verify(service).listNotificationResponsesPaged(userId, 0, 100);
+	}
+
+	@Test
+	void listRejectsSizeAboveMaximum() throws Exception {
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("size", "101")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void listRejectsZeroSizeAndNegativePage() throws Exception {
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("size", "0")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("page", "-1")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void listRejectsMalformedPageWithNeutralMessage() throws Exception {
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("page", "not-a-number")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Malformed request"))
+				.andExpect(jsonPath("$.detail").value("Invalid value for 'page'"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void listRejectsOverflowingSize() throws Exception {
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("size", "9999999999")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Malformed request"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void duplicatePageParametersUseFirstValue() throws Exception {
+		NotificationResponse response = sampleResponse(false);
+		when(service.listNotificationResponsesPaged(userId, 0, 5))
+				.thenReturn(List.of(response));
+
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("page", "0")
+						.queryParam("page", "2")
+						.queryParam("size", "5")
+						.principal(authentication))
+				.andExpect(status().isOk());
+
+		verify(service).listNotificationResponsesPaged(userId, 0, 5);
+	}
+
+	@Test
+	void unauthenticatedListWithInvalidPaginationReturns401() throws Exception {
+		mockMvc.perform(get("/api/v1/me/notifications")
+						.queryParam("page", "-1")
+						.queryParam("size", "500"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void unreadDefaultsToFirstPageOfTwentyAndRejectsInvalidSize() throws Exception {
+		NotificationResponse response = sampleResponse(false);
+		when(service.listUnreadNotificationResponsesPaged(userId, 0, 20))
+				.thenReturn(List.of(response));
+
+		mockMvc.perform(get("/api/v1/me/notifications/unread").principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1));
+
+		verify(service).listUnreadNotificationResponsesPaged(userId, 0, 20);
+
+		mockMvc.perform(get("/api/v1/me/notifications/unread")
+						.queryParam("size", "101")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
 	}
 
 	private NotificationResponse sampleResponse(boolean read) {

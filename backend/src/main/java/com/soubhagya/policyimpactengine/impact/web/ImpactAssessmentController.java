@@ -7,8 +7,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.impact.ImpactAssessmentService;
 import com.soubhagya.policyimpactengine.impact.web.dto.ImpactAssessmentDetailResponse;
 import com.soubhagya.policyimpactengine.impact.web.dto.ImpactAssessmentSummaryResponse;
@@ -40,10 +42,19 @@ public class ImpactAssessmentController {
 		this.service = service;
 	}
 
+	/**
+	 * Phase 13-B — paginated assessment summaries (ADR-026): bare JSON
+	 * array, newest first, windowed by {@code page}/{@code size}
+	 * (defaults 0/20, maximum 100). The principal is resolved before
+	 * pagination is validated so unauthenticated callers stay 401.
+	 */
 	@GetMapping
-	public List<ImpactAssessmentSummaryResponse> list(Authentication authentication) {
+	public List<ImpactAssessmentSummaryResponse> list(Authentication authentication,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
-		return service.listAssessmentSummaries(userId);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return service.listAssessmentSummariesPaged(userId, pagination.page(), pagination.size());
 	}
 
 	@GetMapping("/{assessmentId}")

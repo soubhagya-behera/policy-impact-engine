@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Pageable;
 
 /**
  * Persistence for {@link Policy}.
@@ -39,5 +40,14 @@ public interface PolicyRepository extends JpaRepository<Policy, UUID> {
 	 * Returns the user's policies in registration order, oldest first.
 	 */
 	List<Policy> findByOwner_IdOrderByCreatedAtAscIdAsc(UUID ownerId);
+
+	/**
+	 * Phase 13-B — paginated owner-scoped read. No ordering is embedded
+	 * in the name: the caller supplies the exact deterministic Sort
+	 * (createdAt ASC, id ASC) through the Pageable, so the ordering
+	 * lives in exactly one place. Returns a bare list (limit/offset
+	 * only, no count query).
+	 */
+	List<Policy> findByOwner_Id(UUID ownerId, Pageable pageable);
 
 }

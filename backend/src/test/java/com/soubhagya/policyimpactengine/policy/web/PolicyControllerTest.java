@@ -143,7 +143,7 @@ class PolicyControllerTest {
 	@Test
 	void listReturnsPolicies() throws Exception {
 		PolicyResponse response = sampleResponse();
-		when(service.list(userId)).thenReturn(List.of(response));
+		when(service.listPaged(userId, 0, 20)).thenReturn(List.of(response));
 
 		mockMvc.perform(get("/api/v1/policies").principal(authentication))
 				.andExpect(status().isOk())
@@ -152,7 +152,7 @@ class PolicyControllerTest {
 				.andExpect(jsonPath("$[0].id").value(response.id().toString()))
 				.andExpect(jsonPath("$[0].name").value("Acme Privacy Policy"));
 
-		verify(service).list(userId);
+		verify(service).listPaged(userId, 0, 20);
 	}
 
 	@Test
@@ -229,7 +229,7 @@ class PolicyControllerTest {
 		PolicyResponse response = sampleResponse();
 		when(service.register(userId, "Acme Privacy Policy", "https://example.com/privacy"))
 				.thenReturn(response);
-		when(service.list(userId)).thenReturn(List.of(response));
+		when(service.listPaged(userId, 0, 20)).thenReturn(List.of(response));
 		when(service.get(userId, response.id())).thenReturn(response);
 
 		mockMvc.perform(post("/api/v1/policies")
@@ -253,8 +253,85 @@ class PolicyControllerTest {
 				.andExpect(status().isOk());
 
 		verify(service).register(userId, "Acme Privacy Policy", "https://example.com/privacy");
-		verify(service).list(userId);
+		verify(service).listPaged(userId, 0, 20);
 		verify(service).get(userId, response.id());
+	}
+
+	@Test
+	void listDefaultsToFirstPageOfTwenty() throws Exception {
+		PolicyResponse response = sampleResponse();
+		when(service.listPaged(userId, 0, 20)).thenReturn(List.of(response));
+
+		mockMvc.perform(get("/api/v1/policies").principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$").isArray())
+				.andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].id").value(response.id().toString()));
+
+		verify(service).listPaged(userId, 0, 20);
+	}
+
+	@Test
+	void listAcceptsExplicitPageAndSize() throws Exception {
+		PolicyResponse response = sampleResponse();
+		when(service.listPaged(userId, 1, 5)).thenReturn(List.of(response));
+
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("page", "1")
+						.queryParam("size", "5")
+						.principal(authentication))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1));
+
+		verify(service).listPaged(userId, 1, 5);
+	}
+
+	@Test
+	void listRejectsSizeAboveMaximumZeroSizeAndNegativePage() throws Exception {
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("size", "101")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("size", "0")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("page", "-1")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.title").value("Invalid request"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void listRejectsMalformedSizeWithNeutralMessage() throws Exception {
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("size", "many")
+						.principal(authentication))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Malformed request"))
+				.andExpect(jsonPath("$.detail").value("Invalid value for 'size'"));
+
+		verifyNoInteractions(service);
+	}
+
+	@Test
+	void unauthenticatedListWithInvalidPaginationReturns401() throws Exception {
+		mockMvc.perform(get("/api/v1/policies")
+						.queryParam("page", "-1")
+						.queryParam("size", "500"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.title").value("Unauthenticated"));
+
+		verifyNoInteractions(service);
 	}
 
 	private PolicyResponse sampleResponse() {

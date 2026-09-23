@@ -7,8 +7,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.recommendation.RecommendationService;
 import com.soubhagya.policyimpactengine.recommendation.web.dto.RecommendationDetailResponse;
 import com.soubhagya.policyimpactengine.recommendation.web.dto.RecommendationSummaryResponse;
@@ -40,10 +42,19 @@ public class RecommendationController {
 		this.service = service;
 	}
 
+	/**
+	 * Phase 13-B — paginated recommendations (ADR-026): bare JSON
+	 * array, newest first, windowed by {@code page}/{@code size}
+	 * (defaults 0/20, maximum 100). The principal is resolved before
+	 * pagination is validated so unauthenticated callers stay 401.
+	 */
 	@GetMapping
-	public List<RecommendationSummaryResponse> list(Authentication authentication) {
+	public List<RecommendationSummaryResponse> list(Authentication authentication,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
-		return service.listRecommendationResponses(userId);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return service.listRecommendationResponsesPaged(userId, pagination.page(), pagination.size());
 	}
 
 	@GetMapping("/{recommendationId}")
