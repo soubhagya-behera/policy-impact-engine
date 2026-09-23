@@ -1074,8 +1074,32 @@ dependency; documented in ARCHITECTURE.md §7/§12/§28/§30/§31.
 
 ## Next Action
 
-The next implementation task is the next approved slice
-(user privacy preference REST, assessment/recommendation REST,
-audit trail, or production hardening),
-as scoped in ARCHITECTURE.md §31.
+Phase 13-A slice implemented and tested successfully
+(database/index hardening, evidence-led, index-only):
+- Flyway V18 `V18__feed_read_indexes.sql` (V1–V17 byte-for-byte
+unchanged): exactly two additive composite covering indexes —
+`idx_policy_owner_created ON policy (owner_id, created_at ASC, id ASC)`
+for `findByOwner_IdOrderByCreatedAtAscIdAsc` (Seq Scan + Sort →
+Index Only Scan) and `idx_assessment_user_created
+ON impact_assessment (user_id, created_at DESC, id DESC)` for
+`findByUser_IdOrderByCreatedAtDescIdDesc` (Bitmap Heap Scan + Sort →
+Index Only Scan, plus a faster build side on the recommendation/
+notification feed joins). Plain transactional CREATE INDEX; no
+CONCURRENTLY, no denormalized user_id (ADR-009/015/021 preserved),
+no repository/service/controller/query change, no ordering change,
+no pagination/rate limiting/Actuator/Docker/N+1/API change.
+- Deliberately NOT added (EXPLAIN-verified on postgres:16 with a
+representative 20-user distribution): recommendation/notification
+join-feed indexes (no natural plan change; latent nested-loop path
+only under forced costing — revisit with LIMIT costing in 13-B),
+audit duplication (`idx_audit_event_actor_time` already Index Only),
+point-lookup indexes (already PK/UNIQUE-driven). Existing
+`idx_assessment_user` kept (now redundant for the feed path, but
+removal would be destructive to V7-era objects).
+- `./mvnw.cmd clean test`: 890 tests passing, BUILD SUCCESS
+(Flyway validates/applies all 18 migrations in Testcontainers).
+
+The next implementation task is the next approved Phase 13 slice
+(13-B pagination, 13-C rate limiting, 13-D Actuator, or 13-E Docker),
+as scoped in the approved Phase 13 plan.
 Wait for explicit instruction before beginning the next slice.

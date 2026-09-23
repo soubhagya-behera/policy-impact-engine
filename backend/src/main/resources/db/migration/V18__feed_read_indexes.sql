@@ -1,0 +1,66 @@
+-- Policy Impact Engine
+-- V18: Phase 13-A read-feed index hardening (production hardening, slice A only).
+--
+-- Adds exactly two composite covering indexes justified by PostgreSQL
+-- EXPLAIN (COSTS OFF) evidence on a representative distribution
+-- (20 users x 200 owned policies, 2 versions each, 1 assessment per
+-- policy, 2 recommendations per assessment, ~70% notification coverage,
+-- 2000 chained audit events; postgres:16, VACUUM ANALYZE):
+--
+-- 1. idx_policy_owner_created ON policy (owner_id, created_at ASC, id ASC)
+--    Supports PolicyRepository.findByOwner_IdOrderByCreatedAtAscIdAsc
+--    (GET /api/v1/policies). Before: Seq Scan on policy + Sort.
+--    After: Index Only Scan, sort eliminated.
+--
+-- 2. idx_assessment_user_created
+--    ON impact_assessment (user_id, created_at DESC, id DESC)
+--    Supports ImpactAssessmentRepository.findByUser_IdOrderByCreatedAtDescIdDesc
+--    (GET /api/v1/me/impact-assessments). Before: Bitmap Heap Scan on
+--    idx_assessment_user + Sort. After: Index Only Scan, sort eliminated.
+--    It also improves the build side of the recommendation/notification
+--    feed joins (Bitmap Heap Scan -> Index Only Scan there).
+--
+-- Deliberately NOT added (evidence-led, see Phase 13-A report):
+-- - No recommendation feed index: ordering-only (created_at DESC, id DESC)
+--   and (assessment_id, created_at DESC, id DESC) variants left the
+--   findByAssessment_User_IdOrderByCreatedAtDescIdDesc hash-join plan
+--   unchanged at natural costing. A seqscan-off probe shows the composite
+--   enables an index-only nested loop, but that is latent, not
+--   demonstrated at representative scale. A user_id column on
+--   recommendation was rejected: ownership stays derived through
+--   assessment_id per ADR-009/ADR-015/ADR-021 (no denormalization).
+--   Revisit with LIMIT costing in Phase 13-B (pagination).
+-- - No notification feed/unread index: (created_at DESC, id DESC) and
+--   partial WHERE read_at IS NULL variants left the
+--   findByAssessment_User_IdOrderByCreatedAtDesc(+Unread) hash-join plans
+--   unchanged at natural costing. uq_notification_assessment already
+--   covers the findByAssessment_Id emission re-read. Revisit in 13-B.
+-- - No audit index: idx_audit_event_actor_time already yields an
+--   Index Only Scan for the actor feed; duplicating it is pure write cost.
+-- - No point-lookup indexes: findByIdAndOwner_Id, findByIdAndUser_Id,
+--   findByIdAndAssessment_User_Id and the getOrCreate lookups are already
+--   primary-key or UNIQUE-driven (policy_pkey,
+--   impact_assessment_pkey, uq_assessment_user_new_version); optimal.
+-- - Existing idx_assessment_user is now redundant for the feed path but is
+--   intentionally kept: removal would be a destructive change to V7-era
+--   objects and the legacy findByUser_IdOrderByCreatedAtDesc ordering is
+--   still served by the new composite's prefix. Cleanup, if ever wanted,
+--   belongs to a later slice with its own evidence.
+--
+-- Transaction safety: plain CREATE INDEX (transactional DDL) is used.
+-- CREATE INDEX CONCURRENTLY is deliberately avoided: it cannot run inside
+-- a transaction and the current Flyway configuration runs each migration
+-- transactionally, so CONCURRENTLY would require special migration
+-- behavior for no demonstrated need at this scale.
+--
+-- Ordering semantics are unchanged: the index key orders exactly match the
+-- repository ORDER BY clauses (policy ASC/ASC; assessment DESC/DESC), so
+-- no repository, service, or controller change accompanies this migration.
+-- No pagination, rate limiting, Actuator, Docker, N+1, or API change here.
+-- Non-destructive: does not alter V1-V17 objects or data.
+
+CREATE INDEX idx_policy_owner_created
+    ON policy (owner_id, created_at ASC, id ASC);
+
+CREATE INDEX idx_assessment_user_created
+    ON impact_assessment (user_id, created_at DESC, id DESC);
