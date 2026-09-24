@@ -61,6 +61,11 @@ class ImpactAssessmentControllerTest {
 	@MockitoBean
 	private com.soubhagya.policyimpactengine.common.ratelimit.web.RateLimitFilter rateLimitFilter;
 
+	// Phase 13-D: satisfies SecurityConfig wiring in this slice. Filters
+	// stay disabled, so the mock never executes.
+	@MockitoBean
+	private org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource;
+
 	private UUID userId;
 	private Authentication authentication;
 

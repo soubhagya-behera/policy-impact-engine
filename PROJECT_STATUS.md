@@ -1182,7 +1182,59 @@ classes re-enable it.
 ARCHITECTURE.md §27/§28, and `application-example.properties` —
 no other ADR change; no Actuator/Docker/N+1/cursor work.
 
+Phase 13-D slice implemented and tested successfully
+(observability baseline + HTTP security hardening per DECISIONS.md
+ADR-027, written before code):
+- Actuator starter only (no Micrometer registries, Prometheus,
+tracing, custom indicators, groups, build-info, or management
+port): `health` + `info` exposed under `/actuator` on the same
+port with `show-details=never` (body is `{"status":"UP"}` only);
+both stay authenticated (`anyRequest().authenticated()` covers
+them; anonymous callers get the existing 401 `Unauthenticated`
+problem); `env`/`metrics`/`beans` stay unexposed (404 even with
+credentials). Non-API paths were already outside `RateLimitFilter`.
+- Locked security headers in `SecurityConfig` with exact-string
+tests on 200/401/404/429 paths: `nosniff`, `DENY`,
+`no-referrer`, `default-src 'none'`,
+`geolocation=(), microphone=(), camera=()`,
+`max-age=31536000; includeSubDomains` (custom secure-only writer;
+the default HSTS writer is disabled because it emits spaces),
+`same-origin` COOP/CORP. HSTS asserted present on secure requests
+and absent on plain HTTP. JWT ordering and RFC 7807 shapes
+unchanged.
+- Deny-by-default CORS (`common.web.cors.CorsProperties` record
+with fail-fast validation + `CorsConfig` source): empty
+allowed-origins registers no mappings; when set, exact-origin
+matching on `/api/**` only (never `/actuator/**`), methods within
+GET/POST/PUT, headers within Authorization/Content-Type,
+allow-credentials locked false, max-age default PT1H, no
+`X-Forwarded-For` trust. `OPTIONS /api/**` permitted so
+preflights are not 401-rejected; actual requests stay JWT-gated
+with unchanged user isolation.
+- Preflight-only rate-limit bypass in `RateLimitFilter` (genuine
+preflight = OPTIONS + `/api/` + non-blank Origin + non-blank
+Access-Control-Request-Method; all four required): bypasses
+without consuming budget; arbitrary OPTIONS and all other
+requests keep 13-C behavior with unchanged budgets.
+- Tests: `CorsPropertiesTest` (11 unit), `SecurityHeadersTest`
+(5 chain: 200/secure-200/401/404/429),
+`ActuatorExposureTest` (6 chain: 401/UP-no-details/info/3×404/
+preflight-no-CORS), `CorsPreflightTest` (3 chain, disabled
+default), `CorsAllowedOriginTest` (5 chain, enabled origin +
+bypass proof), +2 focused `RateLimitFilterTest` cases; 9 slice
+tests gain a `@MockitoBean CorsConfigurationSource` for the new
+chain wiring (filters stay disabled there). The shared profile
+keeps the limiter disabled except the dedicated re-enabled
+suites; test resources pin the health/info exposure.
+- No migration (V1–V18 untouched), no scoring/pagination/audit/
+business-logic change, no Redis/Kafka/Docker/metrics work;
+documented in ADR-027, ARCHITECTURE.md §27/§30/§31, and
+`application-example.properties` — no other ADR change.
+- `./mvnw.cmd clean test`: 1015 tests passing (983 pre-13-D + 32 new),
+0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies all
+18 migrations in Testcontainers).
+
 The next implementation task is the next approved Phase 13 slice
-(13-D Actuator or 13-E Docker),
+(13-E Docker),
 as scoped in the approved Phase 13 plan.
 Wait for explicit instruction before beginning the next slice.

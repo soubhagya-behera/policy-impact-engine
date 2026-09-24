@@ -636,3 +636,37 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - NAT egress sharing means one IP's bad actors can consume the auth/anonymous budget of neighbors; the chosen limits keep normal use far below the ceiling, and the kill-switch covers incidents. No per-IP allowlist exists in v1.
 - Any broadening (new tiers, higher limits, quota headers, proxy-aware keying, distributed state) requires its own decision; this ADR is a ceiling, not a floor.
 
+---
+
+## ADR-027 — Observability Baseline & HTTP Security Hardening (Phase 13-D)
+
+**Status:** Accepted (as the binding contract for the Phase 13-D implementation; written before code per the project workflow)
+
+**Context:** The application exposes no health endpoint for operators, emits no explicit HTTP security headers beyond framework defaults, and has no CORS policy (any cross-origin browser use fails closed, while a future browser client needs a reviewable opt-in). Phase 13-C proved in-process rate limiting behind JWT authentication (ADR-025); Phase 13-D must add the minimal observability and transport hardening without changing authentication, authorization, rate-limit budgets, pagination, audit, scoring, or business logic, and without Redis, Kafka, Docker, or metrics infrastructure.
+
+**Decision:**
+
+1. Actuator is `org.springframework.boot:spring-boot-starter-actuator` only (parent-managed version, Java 17 compatible). No Micrometer registries, no Prometheus, no tracing, no custom `HealthIndicator`, no health groups, no `build-info`, no separate management port — same application port, default `/actuator` base path.
+2. Web exposure is exactly `health` plus `info` (`management.endpoints.web.exposure.include=health,info`); `env`, `beans`, `metrics`, `mappings`, and every other endpoint stay unexposed (404). `management.endpoint.health.show-details=never`: the body is `{"status":"UP"}` only, with no component detail for any caller.
+3. Health and info stay behind the existing authenticated-by-default chain (`anyRequest().authenticated()` already covers `/actuator/**`; no `permitAll`). Missing/invalid JWTs reuse the existing 401 entry point. External unauthenticated probing stays a 13-E Docker decision.
+4. Security headers are set explicitly in `SecurityConfig` with the locked literal values below; tests assert exact strings:
+   - `X-Content-Type-Options: nosniff`
+   - `X-Frame-Options: DENY`
+   - `Referrer-Policy: no-referrer`
+   - `Content-Security-Policy: default-src 'none'`
+   - `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+   - `Strict-Transport-Security: max-age=31536000; includeSubDomains` (custom writer with the spaceless literal — Spring's default writer emits spaces around `;` — applied on secure requests only, absent on plain HTTP; the default HSTS writer is disabled)
+   - `Cross-Origin-Opener-Policy: same-origin`
+   - `Cross-Origin-Resource-Policy: same-origin`
+5. CORS is deny-by-default under `app.cors.*` (`CorsProperties` record with fail-fast validation, following the `RateLimitProperties` pattern): empty `allowed-origins` (the default) registers no CORS mappings, so cross-origin browser calls are blocked. When configured, exact-origin matching only (no wildcards, `http(s)://host[:port]` shape, no paths), methods subset of `GET,POST,PUT` (default all three), headers subset of `Authorization,Content-Type` (default both), `allow-credentials` locked to `false`, `max-age` default `PT1H`. Mappings apply to `/api/**` only, never `/actuator/**`. `X-Forwarded-For` stays untrusted (ADR-025 precedent).
+6. JWT ordering is unchanged (`JwtAuthenticationFilter` before `UsernamePasswordAuthenticationFilter`, `RateLimitFilter` after JWT). `OPTIONS /api/**` is permitted at the authorization layer so browser preflights are not rejected with 401; actual `GET/POST/PUT` requests remain authenticated with principal-only identity and unchanged user isolation.
+7. A request bypasses `RateLimitFilter` if and only if all four hold: method is `OPTIONS`, URI starts with `/api/`, the `Origin` header is present and non-blank, and the `Access-Control-Request-Method` header is present and non-blank (the Fetch preflight signature). Arbitrary `OPTIONS /api/**` without both headers keeps existing 13-C tier behavior; non-OPTIONS and non-`/api/**` behavior is unchanged.
+8. No Flyway migration (V1–V18 untouched), no new rate-limit budgets, no RFC 7807 shape change (429/401/403/404 bodies keep their existing titles), no scoring/pagination/audit/business-logic change.
+
+**Consequences:**
+
+- Operators get an authenticated liveness signal and clients get hardened transport defaults, while the anonymous surface area does not grow by a single endpoint.
+- The spaceless HSTS literal and ordered `Permissions-Policy` value are pinned by exact-string tests; any future header change is a plan-level decision, not a silent tweak.
+- CORS stays closed until an operator allowlists exact origins; the preflight permit and the four-condition rate-limit bypass are the only authentication/throttling integration, both proven by dedicated tests.
+- Metrics, tracing, probes, management-port separation, Docker health checks, and any broadening (new actuator endpoints, credentialed CORS, relaxed CSP) each require their own decision; this ADR is a ceiling, not a floor.
+

@@ -166,6 +166,43 @@ class RateLimitFilterTest {
 		assertThat(harness.lastResponse().getStatus()).isEqualTo(429);
 	}
 
+	@Test
+	void genuinePreflightBypassesWithoutConsumingBudget() throws Exception {
+		Harness harness = new Harness(properties(10, 1, 10, 1), true);
+		UUID userId = UUID.randomUUID();
+
+		for (int i = 0; i < 5; i++) {
+			MockHttpServletRequest preflight =
+					request("OPTIONS", "/api/v1/policies", userId, "9.9.9.9");
+			preflight.addHeader("Origin", "https://app.example.com");
+			preflight.addHeader("Access-Control-Request-Method", "GET");
+			harness.filter().doFilter(preflight, harness.response(), harness.chain());
+		}
+
+		assertThat(harness.calls()).isEqualTo(5);
+		assertThat(harness.service().trackedKeys()).isZero();
+	}
+
+	@Test
+	void arbitraryOptionsWithoutPreflightHeadersKeepsTierBehavior() throws Exception {
+		Harness harness = new Harness(properties(10, 1, 10, 10), true);
+		UUID userId = UUID.randomUUID();
+
+		harness.filter().doFilter(
+				request("GET", "/api/v1/policies", userId, "9.9.9.9"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(1);
+
+		MockHttpServletRequest optionsWithoutRequestMethod =
+				request("OPTIONS", "/api/v1/policies", userId, "9.9.9.9");
+		optionsWithoutRequestMethod.addHeader("Origin", "https://app.example.com");
+		harness.filter().doFilter(
+				optionsWithoutRequestMethod, harness.response(), harness.chain());
+
+		assertThat(harness.calls()).isEqualTo(1);
+		assertThat(harness.lastResponse().getStatus()).isEqualTo(429);
+	}
+
 	@AfterEach
 	void clearAuthentication() {
 		SecurityContextHolder.clearContext();

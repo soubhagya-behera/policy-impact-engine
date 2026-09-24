@@ -61,6 +61,11 @@ class AuthControllerTest {
 	@MockitoBean
 	private com.soubhagya.policyimpactengine.common.ratelimit.web.RateLimitFilter rateLimitFilter;
 
+	// Phase 13-D: satisfies SecurityConfig wiring in this slice. Filters
+	// stay disabled, so the mock never executes.
+	@MockitoBean
+	private org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource;
+
 	@Test
 	void registerReturnsCreatedResponseWithIdAndEmailOnly() throws Exception {
 		UUID id = UUID.randomUUID();

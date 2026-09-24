@@ -65,6 +65,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
 			chain.doFilter(request, response);
 			return;
 		}
+		if (isCorsPreflight(request)) {
+			chain.doFilter(request, response);
+			return;
+		}
 		RateLimitService.Decision decision = decide(request);
 		if (decision.allowed()) {
 			chain.doFilter(request, response);
@@ -105,6 +109,25 @@ public class RateLimitFilter extends OncePerRequestFilter {
 			return rateLimitService.apiRequest(userId);
 		}
 		return rateLimitService.anonymousRequest(clientIp);
+	}
+
+	/**
+	 * Phase 13-D — true only for CORS preflight requests (see
+	 * DECISIONS.md ADR-027): {@code OPTIONS} on {@code /api/**} with
+	 * both a non-blank {@code Origin} and a non-blank
+	 * {@code Access-Control-Request-Method} header. Arbitrary
+	 * {@code OPTIONS} without both headers is not a preflight and
+	 * keeps the 13-C tier behavior.
+	 */
+	private static boolean isCorsPreflight(HttpServletRequest request) {
+		return "OPTIONS".equalsIgnoreCase(request.getMethod())
+				&& request.getRequestURI().startsWith("/api/")
+				&& hasText(request.getHeader("Origin"))
+				&& hasText(request.getHeader("Access-Control-Request-Method"));
+	}
+
+	private static boolean hasText(String value) {
+		return value != null && !value.isBlank();
 	}
 
 	private static String clientIp(HttpServletRequest request) {

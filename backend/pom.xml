@@ -57,6 +57,13 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
+		<dependency>
+			<!-- Minimal observability baseline (Phase 13-D, see DECISIONS.md ADR-027):
+			     health + info endpoints only. No Micrometer registries,
+			     no Prometheus, no tracing. -->
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
 
 		<dependency>
 			<groupId>org.postgresql</groupId>
