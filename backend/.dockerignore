@@ -1,0 +1,8 @@
+# Phase 13-E: keep the build context to what the image needs.
+target/
+.git/
+.idea/
+.vscode/
+*.iml
+*.log
+src/main/resources/application.properties

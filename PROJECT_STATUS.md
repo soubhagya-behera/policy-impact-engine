@@ -1234,6 +1234,42 @@ documented in ADR-027, ARCHITECTURE.md §27/§30/§31, and
 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies all
 18 migrations in Testcontainers).
 
+Phase 13-E slice implemented and verified successfully
+(containerized local deployment per DECISIONS.md ADR-028, written
+before code; zero Java/domain changes):
+- `backend/Dockerfile` (multi-stage: `maven:3.9-eclipse-temurin-17`
+build, `eclipse-temurin:17-jre-jammy` runtime with unpinned curl
+for the probe only; jar-only runtime layer; non-root UID 65532;
+`EXPOSE 8080`; `JAVA_OPTS=-XX:MaxRAMPercentage=75.0`; exact
+401-or-200 HEALTHCHECK; no secrets in layers) + `backend/
+.dockerignore` (excludes target, .git, IDE files, and the local
+`application.properties`).
+- Root `compose.yaml` (`db` on `postgres:16-alpine` with
+`policypulse`, env credentials, `pgdata` volume, no published
+port, `pg_isready` gate; `backend` on `db:5432` with env-only
+datasource/JWT/CORS/rate-limit/AI config, `service_healthy`
+ordering, `unless-stopped`, `read_only` + `/tmp` tmpfs,
+`8080:8080`; optional `ollama` under profile `ai`, OFF by
+default, Phase 12 fallback intact) + `.env.example`
+(placeholders only) + root `.gitignore` (`.env` never committed).
+- Single-replica rule documented (per-instance rate limiting and
+scheduler ticks; no scaling without a new ADR); Actuator stays
+authenticated with the 401-asserting probe semantics; JWT rotation
+is recreate-the-container; DB password rotation stays manual.
+- Verification (all performed 2026-09-24, throwaway local secrets,
+removed afterwards): `./mvnw.cmd clean test` 1015/0/0; `compose
+config` renders with `:?` fail-fast proven by removing `.env`;
+image builds; `up -d` brings db + backend to healthy (backend UID
+65532; HEALTHCHECK JSON contains no secret; `docker history` shows
+no secret values); Flyway V1–V18 migrates from zero on first boot;
+smoke register→login→policies 200 with JWT and 401 without;
+`/actuator/health` 401 anonymous / 200 `UP` with JWT (no
+`components`; HSTS absent on HTTP; exact header literals spot-
+checked); `env`/`metrics` 404; data survives `down` + restart
+(pre-existing user logs in); `down -v` re-migrates cleanly (old
+user gone, fresh register works); ai profile renders with backend
+defaults inert (`AI_ENABLED=false`).
+
 The next implementation task is the next approved Phase 13 slice
 (13-E Docker),
 as scoped in the approved Phase 13 plan.

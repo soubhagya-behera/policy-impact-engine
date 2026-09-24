@@ -670,3 +670,30 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - CORS stays closed until an operator allowlists exact origins; the preflight permit and the four-condition rate-limit bypass are the only authentication/throttling integration, both proven by dedicated tests.
 - Metrics, tracing, probes, management-port separation, Docker health checks, and any broadening (new actuator endpoints, credentialed CORS, relaxed CSP) each require their own decision; this ADR is a ceiling, not a floor.
 
+---
+
+## ADR-028 — Docker & Local Deployment (Phase 13-E)
+
+**Status:** Accepted (as the binding contract for the Phase 13-E implementation; written before code per the project workflow)
+
+**Context:** The application runs only as a local Maven process against a hand-provisioned PostgreSQL database (`policypulse`), with configuration split between a Git-ignored local `application.properties` and the committed `application-example.properties` template. A reviewer or operator has no reproducible way to build, configure, and run the full stack. Phase 13-E must provide containerized local/production deployment with zero application-code changes, reusing the 13-D posture (authenticated Actuator, locked headers, deny-by-default CORS, per-instance rate limiting) and the Phase 12 inert-by-default AI design.
+
+**Decision:**
+
+1. One multi-stage `backend/Dockerfile` (build context `backend/`): build stage `maven:3.9-eclipse-temurin-17` runs `./mvnw -DskipTests package`; runtime stage `eclipse-temurin:17-jre-jammy` (glibc conservatism over Alpine) copies only the built jar. No source, Maven cache, secrets, or build args in the runtime layer.
+2. Runtime runs as non-root (`appuser`, fixed numeric UID `65532`), `EXPOSE 8080`, entrypoint `sh -c 'java $JAVA_OPTS -jar /app/app.jar'` with default `JAVA_OPTS=-XX:MaxRAMPercentage=75.0`. Filesystem `read_only: true` with a `/tmp` tmpfs; if embedded-Tomcat temp behavior rejects this during verification, the documented rollback is dropping `read_only` (recorded in PROJECT_STATUS, not silently kept).
+3. Runtime HTTP client for the health probe is `curl` installed unpinned from the jammy archive (`apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*`, one layer). No version pin is claimed.
+4. Backend HEALTHCHECK is exactly `sh -c 'code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 4 http://127.0.0.1:8080/actuator/health); test "$code" = "401" -o "$code" = "200"'` (`--interval=30s --timeout=5s --retries=3 --start-period=60s`). `401` (chain up and locked) and `200` exit 0; `000`/timeout/any other status is unhealthy. The probe sends no credentials and changes nothing about Actuator authentication: exposing `health` publicly is explicitly rejected here and needs its own future ADR if operations ever require depth probes. Documented meaning: 401 proves liveness + posture, DB depth comes from the `pg_isready` gate plus Flyway boot success — this is not a deep readiness probe.
+5. Root `compose.yaml` with two default services: `db` (`postgres:16-alpine`, matching the Testcontainers version; `POSTGRES_DB=policypulse`; credentials from required env with `:?` fail-fast; named volume `pgdata`; no published host port; `pg_isready` healthcheck) and `backend` (builds `backend/Dockerfile`; `8080:8080`; datasource/JWT/CORS/rate-limit/AI via documented env names; `depends_on: db service_healthy`; `restart: unless-stopped`). Default bridge network; backend reaches the DB as `db:5432`.
+6. Secrets live only in a Git-ignored root `.env` (or shell environment); committed `.env.example` carries placeholders and comments only. `POSTGRES_PASSWORD` and `SECURITY_JWT_SECRET` are never committed or baked into layers (verified via `docker history`/`compose config` secret scan).
+7. Single replica only: in-memory rate limiting and the scheduler tick are per-instance; scaling past one backend needs a new ADR (ShedLock/distributed limiting are explicitly not part of 13-E).
+8. Optional `ollama` service under Compose profile `ai` (off by default): `ollama/ollama` + model volume, `AI_ENABLED=true`, `AI_BASE_URL=http://ollama:11434`, explicit `AI_MODEL`. Fits Phase 12 exactly (environmental config, deterministic fallback when the model is absent); never mandatory, no application change.
+9. No Flyway migration (V1–V18 apply on boot), no Java/domain/config-default changes, no budgets/ports changed.
+
+**Consequences:**
+
+- Any operator reproduces the stack with `cp .env.example .env` (edit secrets) + `docker compose up -d --build`; schema, seed concepts, and defaults come from the image itself.
+- The anonymous surface does not grow: health stays authenticated and the probe asserts that fact on every interval.
+- JWT rotation is recreate-the-container; DB password rotation is manual; both documented gaps, no automation in 13-E.
+- Deferred production items (unchanged from planning): Kubernetes/AWS/reverse-proxy/TLS/CI-CD, backups beyond the named volume, metrics/tracing, management-port split, public health exposure, password rotation automation.
+

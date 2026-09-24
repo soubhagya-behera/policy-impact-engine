@@ -82,3 +82,19 @@ After a phase is completed and verified, update PROJECT_STATUS.md (see rule 25) 
 ./mvnw verify     # run the full lifecycle including integration checks
 ```
 
+## Containerized Local Deployment (Phase 13-E)
+
+```bash
+cp .env.example .env   # then edit real secrets into .env (never commit it)
+docker compose up -d --build        # backend + PostgreSQL (http://localhost:8080)
+docker compose --profile ai up -d   # optional local-AI explanations (off by default)
+docker compose logs -f backend      # watch Flyway migrations + startup
+docker compose down                 # stop; pgdata volume keeps all data
+docker compose down -v              # stop AND delete all data (clean re-migration)
+```
+
+Rules: secrets live only in the Git-ignored `.env`; the backend runs
+as a single replica (do not scale without a new ADR); Actuator health
+stays authenticated and the container HEALTHCHECK asserts that 401
+posture (see DECISIONS.md ADR-028).
+
