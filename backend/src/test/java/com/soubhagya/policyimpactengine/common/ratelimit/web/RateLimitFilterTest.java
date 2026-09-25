@@ -215,7 +215,8 @@ class RateLimitFilterTest {
 				Duration.ofMinutes(1), api,
 				Duration.ofMinutes(1), explanation,
 				Duration.ofMinutes(1), anonymous,
-				1000, Duration.ofMinutes(10));
+				1000, Duration.ofMinutes(10),
+				Duration.ofMinutes(1), 10);
 	}
 
 	private static MockHttpServletRequest request(String method, String uri,
@@ -242,14 +243,15 @@ class RateLimitFilterTest {
 		private int calls;
 		private MockHttpServletResponse lastResponse;
 
-		Harness(RateLimitProperties properties, boolean enabled) {
+			Harness(RateLimitProperties properties, boolean enabled) {
 			RateLimitProperties effective = enabled ? properties
 					: new RateLimitProperties(false,
 							Duration.ofMinutes(1), properties.authMaxRequests(),
 							Duration.ofMinutes(1), properties.apiMaxRequests(),
 							Duration.ofMinutes(1), properties.explanationMaxRequests(),
 							Duration.ofMinutes(1), properties.anonymousMaxRequests(),
-							1000, Duration.ofMinutes(10));
+							1000, Duration.ofMinutes(10),
+							Duration.ofMinutes(1), 10);
 			this.service = new RateLimitService(effective,
 					Clock.fixed(Instant.parse("2026-09-23T10:00:00Z"), ZoneOffset.UTC));
 			this.filter = new RateLimitFilter(service, effective, new ObjectMapper());

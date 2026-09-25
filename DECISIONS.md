@@ -697,3 +697,28 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - JWT rotation is recreate-the-container; DB password rotation is manual; both documented gaps, no automation in 13-E.
 - Deferred production items (unchanged from planning): Kubernetes/AWS/reverse-proxy/TLS/CI-CD, backups beyond the named volume, metrics/tracing, management-port split, public health exposure, password rotation automation.
 
+---
+
+## ADR-029 — Refresh-Token Authentication Lifecycle (Phase 14-A)
+
+**Status:** Accepted (as the binding contract for the Phase 14-A implementation; written before code per the project workflow)
+
+**Context:** Access tokens are short-lived (`PT15M` default, ADR-018) with no renewal path, so every client re-authenticates with email + password every 15 minutes (Phase 8C deferred this as refresh tokens). Any renewal mechanism must preserve the existing stolen-token bound, the uniform-401 no-oracle posture, the empty-authorities principal model, and the DB-serialization concurrency philosophy — without Redis, new infrastructure, roles, or OAuth2.
+
+**Decision:**
+
+1. Model is stateful rotating opaque tokens. On each successful login the server generates a 256-bit token (`SecureRandom`, base64url), persists **only its SHA-256 hex** (raw tokens never touch the database), and returns the raw value once in the login response. Stateless signed refresh JWTs are rejected (revocation/reuse detection needs state anyway); reusable long-lived tokens are rejected (theft is undetectable until expiry).
+2. Lifetime is absolute 30 days (`security.jwt.refresh-token-ttl`, default `PT720H`, must be positive, fail-fast like the JWT secret). No sliding renewal: every use rotates (single-use), but expiry never extends.
+3. Atomic login: the initial refresh-token row is inserted in the **same transaction** as the successful login. If persistence fails, login fails with the existing uniform 401 — never a 200 without a usable refresh token. Audit emission stays post-commit and independently isolated, exactly as today (ADR-022 §2).
+4. Refresh is `POST /api/v1/auth/refresh` with `{refreshToken}` in its own short transaction: atomically consume (predicate UPDATE on `token_hash` + unrevoked + unexpired) and insert the successor, then issue the access token. Exactly one of two simultaneous same-token requests succeeds (UNIQUE + predicate update is the serialization point; no Java locks).
+5. Reuse containment: presenting a superseded token (one carrying a `replaced_by` successor link) identifies the owning user **from that row** and revokes all that user's live tokens (live = unrevoked + unexpired). The request still returns the uniform 401 — expired, revoked, unknown, and reused are indistinguishable to callers.
+6. Detection window: revoked rows are retained until expiry so reuse stays detectable; the scheduled purge removes expired rows, after which a presentation is merely unknown/invalid and cannot trigger family revocation. Accepted explicitly: post-expiry there is nothing live left to protect.
+7. Throttling is a separate `auth-refresh:<ip>` tier at **10/min/IP** (same brute-force profile as login, separate key so login/register budgets are unaffected). `X-Forwarded-For` stays untrusted (ADR-025 precedent).
+8. No new audit event in 14-A: refresh is session maintenance (ADR-022 §3 emits nothing on reads) and the session origin stays witnessed by `AUTH_LOGIN_SUCCEEDED`. A reuse-detection code would need a CHECK-constraint migration and stays an explicit follow-up. Logout (revoke-current/all) is deferred to its own slice.
+9. V19 is reserved for the next slice: the `auth_refresh_token` table (`user_id` FK, `token_hash` UNIQUE, validity window, `revoked_at`, successor link) plus the purge discipline. This slice adds configuration and this decision only — no migration, entity, endpoint, filter, or login-behavior change. No roles, authorities, OAuth2, or new dependencies at any point.
+
+**Consequences:**
+
+- Clients gain a bounded 30-day session with theft containment (reuse kills the family; worst case is re-login), while the access-token TTL and all 401 shapes stay byte-identical.
+- The granted-but-unimplemented surface is explicit: logout, reuse audit codes, and successor-grace for racing clients each need their own decision; this ADR is a ceiling, not a floor.
+

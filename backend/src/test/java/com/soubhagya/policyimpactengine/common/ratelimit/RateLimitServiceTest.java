@@ -32,7 +32,8 @@ class RateLimitServiceTest {
 				Duration.ofMinutes(1), 5,
 				Duration.ofMinutes(1), 2,
 				Duration.ofMinutes(1), 4,
-				1000, Duration.ofMinutes(10));
+				1000, Duration.ofMinutes(10),
+				Duration.ofMinutes(1), 10);
 	}
 
 	private static RateLimitService service(Clock clock) {
@@ -101,7 +102,8 @@ class RateLimitServiceTest {
 				Duration.ofMinutes(1), 5,
 				Duration.ofMinutes(1), 2,
 				Duration.ofMinutes(1), 4,
-				3, Duration.ofMinutes(10));
+				3, Duration.ofMinutes(10),
+				Duration.ofMinutes(1), 10);
 		ManualClock clock = new ManualClock();
 		RateLimitService service = new RateLimitService(props, clock);
 		service.apiRequest(UUID.randomUUID());
@@ -122,7 +124,8 @@ class RateLimitServiceTest {
 				Duration.ofMinutes(1), 100,
 				Duration.ofMinutes(1), 100,
 				Duration.ofMinutes(1), 100,
-				5, Duration.ofMinutes(10));
+				5, Duration.ofMinutes(10),
+				Duration.ofMinutes(1), 10);
 		RateLimitService service = new RateLimitService(props,
 				Clock.fixed(START, ZoneOffset.UTC));
 		for (int i = 0; i < 50; i++) {
@@ -198,21 +201,24 @@ class RateLimitServiceTest {
 				Duration.ofMinutes(1), 5,
 				Duration.ofMinutes(1), 2,
 				Duration.ofMinutes(1), 4,
-				1000, Duration.ofMinutes(10)))
+				1000, Duration.ofMinutes(10),
+				Duration.ofMinutes(1), 10))
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new RateLimitProperties(true,
 				Duration.ofMinutes(1), 0,
 				Duration.ofMinutes(1), 5,
 				Duration.ofMinutes(1), 2,
 				Duration.ofMinutes(1), 4,
-				1000, Duration.ofMinutes(10)))
+				1000, Duration.ofMinutes(10),
+				Duration.ofMinutes(1), 10))
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new RateLimitProperties(true,
 				Duration.ofMinutes(1), 3,
 				Duration.ofMinutes(1), 5,
 				Duration.ofMinutes(1), 2,
 				Duration.ofMinutes(1), 4,
-				0, Duration.ofMinutes(10)))
+				0, Duration.ofMinutes(10),
+				Duration.ofMinutes(1), 10))
 				.isInstanceOf(IllegalArgumentException.class);
 	}
 

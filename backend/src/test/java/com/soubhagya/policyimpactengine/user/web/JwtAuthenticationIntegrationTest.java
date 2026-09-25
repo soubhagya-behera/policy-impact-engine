@@ -178,7 +178,7 @@ class JwtAuthenticationIntegrationTest {
 		assertThat(token).isNotBlank();
 
 		JwtService otherKey = new JwtService(
-				new JwtProperties("different-test-secret-that-is-long-enough-0000", null),
+				new JwtProperties("different-test-secret-that-is-long-enough-0000", null, null),
 				Clock.systemUTC());
 		String forged = otherKey.issueAccessToken(userId);
 

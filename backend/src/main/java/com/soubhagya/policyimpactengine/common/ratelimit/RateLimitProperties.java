@@ -14,6 +14,11 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * incident kill-switch: when false the filter passes everything
  * through. Non-positive values fail fast here at binding time so a
  * misconfigured deployment never boots half-limited.
+ *
+ * <p>Phase 14-A/1 reserves the refresh tier (see DECISIONS.md
+ * ADR-029): same shape and validation as the auth tier, consumed by
+ * filter routing in a later slice — no service or filter behavior
+ * attaches to it here.
  */
 @ConfigurationProperties(prefix = "rate-limit")
 public record RateLimitProperties(
@@ -28,7 +33,9 @@ public record RateLimitProperties(
 		@DefaultValue("PT1M") Duration anonymousWindow,
 		@DefaultValue("60") int anonymousMaxRequests,
 		@DefaultValue("100000") int maxTrackedKeys,
-		@DefaultValue("PT10M") Duration idleTtl
+		@DefaultValue("PT10M") Duration idleTtl,
+		@DefaultValue("PT1M") Duration refreshWindow,
+		@DefaultValue("10") int refreshMaxRequests
 
 ) {
 
@@ -67,6 +74,12 @@ public record RateLimitProperties(
 		}
 		if (idleTtl == null || idleTtl.isZero() || idleTtl.isNegative()) {
 			throw new IllegalArgumentException("rate-limit.idle-ttl must be positive");
+		}
+		if (refreshWindow == null || refreshWindow.isZero() || refreshWindow.isNegative()) {
+			throw new IllegalArgumentException("rate-limit.refresh-window must be positive");
+		}
+		if (refreshMaxRequests < 1) {
+			throw new IllegalArgumentException("rate-limit.refresh-max-requests must be >= 1");
 		}
 	}
 }

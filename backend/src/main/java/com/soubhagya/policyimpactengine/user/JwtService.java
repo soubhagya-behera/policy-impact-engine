@@ -28,15 +28,22 @@ import com.nimbusds.jwt.SignedJWT;
  * mode collapses to {@link JwtInvalidException} with no reason detail.
  * The injected {@link Clock} pins time in tests; production reuses the
  * shared system-UTC clock bean.
+ *
+ * <p>Phase 14-A/1 resolves the refresh-token lifetime bound from
+ * {@code security.jwt.refresh-token-ttl} (see DECISIONS.md ADR-029):
+ * null resolves to the 30-day default; zero or negative values fail
+ * fast at startup. No refresh issuance or validation lives here yet.
  */
 @Service
 public class JwtService {
 
 	static final Duration DEFAULT_ACCESS_TOKEN_TTL = Duration.ofMinutes(15);
+	static final Duration DEFAULT_REFRESH_TOKEN_TTL = Duration.ofHours(720);
 	static final int MIN_SECRET_UTF8_BYTES = 32;
 
 	private final byte[] secret;
 	private final Duration accessTokenTtl;
+	private final Duration refreshTokenTtl;
 	private final Clock clock;
 
 	public JwtService(JwtProperties properties, Clock clock) {
@@ -57,6 +64,13 @@ public class JwtService {
 		this.accessTokenTtl = properties.accessTokenTtl() != null
 				? properties.accessTokenTtl()
 				: DEFAULT_ACCESS_TOKEN_TTL;
+		Duration refreshTtl = properties.refreshTokenTtl() != null
+				? properties.refreshTokenTtl()
+				: DEFAULT_REFRESH_TOKEN_TTL;
+		if (refreshTtl.isZero() || refreshTtl.isNegative()) {
+			throw new IllegalStateException("security.jwt.refresh-token-ttl must be positive");
+		}
+		this.refreshTokenTtl = refreshTtl;
 		this.clock = clock;
 	}
 
@@ -127,5 +141,14 @@ public class JwtService {
 	 */
 	public long accessTokenExpiresInSeconds() {
 		return accessTokenTtl.toSeconds();
+	}
+
+	/**
+	 * Phase 14-A/1 — configured refresh-token lifetime in seconds.
+	 * Consumed by the refresh lifecycle in a later slice; no issuance
+	 * or validation behavior attaches to it here.
+	 */
+	public long refreshTokenExpiresInSeconds() {
+		return refreshTokenTtl.toSeconds();
 	}
 }

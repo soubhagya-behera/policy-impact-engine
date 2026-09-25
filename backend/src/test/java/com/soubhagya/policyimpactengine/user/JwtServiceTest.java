@@ -33,7 +33,7 @@ class JwtServiceTest {
 	private static final String OTHER_SECRET = "other-test-secret-for-wrong-key-cases-00000";
 
 	private static JwtService serviceAt(Instant instant) {
-		return new JwtService(new JwtProperties(SECRET, null), Clock.fixed(instant, ZoneOffset.UTC));
+		return new JwtService(new JwtProperties(SECRET, null, null), Clock.fixed(instant, ZoneOffset.UTC));
 	}
 
 	@Test
@@ -50,7 +50,7 @@ class JwtServiceTest {
 	@Test
 	void customTtlIsHonored() {
 		JwtService service = new JwtService(
-				new JwtProperties(SECRET, Duration.ofMinutes(5)), Clock.fixed(NOW, ZoneOffset.UTC));
+				new JwtProperties(SECRET, Duration.ofMinutes(5), null), Clock.fixed(NOW, ZoneOffset.UTC));
 		UUID userId = UUID.randomUUID();
 
 		String token = service.issueAccessToken(userId);
@@ -77,7 +77,7 @@ class JwtServiceTest {
 	void wrongKeyIsRejected() {
 		String token = serviceAt(NOW).issueAccessToken(UUID.randomUUID());
 		JwtService otherKey = new JwtService(
-				new JwtProperties(OTHER_SECRET, null), Clock.fixed(NOW, ZoneOffset.UTC));
+				new JwtProperties(OTHER_SECRET, null, null), Clock.fixed(NOW, ZoneOffset.UTC));
 
 		assertThatThrownBy(() -> otherKey.parseUserId(token))
 				.isInstanceOf(JwtInvalidException.class)
@@ -155,16 +155,16 @@ class JwtServiceTest {
 	void blankMissingOrShortSecretFailsFast() {
 		Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
-		assertThatThrownBy(() -> new JwtService(new JwtProperties(null, null), clock))
+		assertThatThrownBy(() -> new JwtService(new JwtProperties(null, null, null), clock))
 				.isInstanceOf(IllegalStateException.class);
-		assertThatThrownBy(() -> new JwtService(new JwtProperties("   ", null), clock))
+		assertThatThrownBy(() -> new JwtService(new JwtProperties("   ", null, null), clock))
 				.isInstanceOf(IllegalStateException.class);
-		assertThatThrownBy(() -> new JwtService(new JwtProperties("too-short", null), clock))
+		assertThatThrownBy(() -> new JwtService(new JwtProperties("too-short", null, null), clock))
 				.isInstanceOf(IllegalStateException.class)
 				.hasMessageContaining("32 UTF-8 bytes");
 		assertThatThrownBy(() -> new JwtService(null, clock))
 				.isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new JwtService(new JwtProperties(SECRET, null), null))
+		assertThatThrownBy(() -> new JwtService(new JwtProperties(SECRET, null, null), null))
 				.isInstanceOf(IllegalArgumentException.class);
 	}
 
