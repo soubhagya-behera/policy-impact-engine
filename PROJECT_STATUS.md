@@ -1270,7 +1270,36 @@ checked); `env`/`metrics` 404; data survives `down` + restart
 user gone, fresh register works); ai profile renders with backend
 defaults inert (`AI_ENABLED=false`).
 
-The next implementation task is the next approved Phase 13 slice
-(13-E Docker),
-as scoped in the approved Phase 13 plan.
-Wait for explicit instruction before beginning the next slice.
+Phase 13-F slice implemented and tested successfully
+(feed N+1 mitigation on the paged paths only; behavior stays
+inside the ADR-026/ADR-027 ceilings, so no ADR change):
+- `ImpactAssessmentRepository.findPagedWithVersions` (paginated,
+caller-supplied Sort): fetch-joins `newVersion` +
+`previousVersion` in the page query;
+`NotificationRepository.findPagedWithAssessmentVersion` /
+`findPagedUnreadWithAssessmentVersion`: fetch-join `assessment`
++ its `newVersion` in the page query. The paged service methods
+read through these queries with unchanged rows, order,
+ownership, DTO shape, and read transactions
+(`diagnosePerRowFetches` asserts zero per-row version/assessment
+fetches at size=2).
+- No entity `FetchType` change (no new EAGER association, no
+EntityGraph, no batch hints, no projections); no migration
+(V1–V18 untouched), no new index, no dependency change; the
+unbounded internal readers (notably the `AiExplanationService`
+recommendation path) are untouched.
+- Query-count result (`FeedQueryCountBaselineTest`, 45 seeded
+rows, sizes 1/5/20/100, pages 0/1, per-call SELECTs via
+Hibernate statistics): assessments 1 SELECT/page;
+notifications/unread 1 SELECT/page (at most 2 tolerated for
+provider-specific join rendering, constant in N);
+recommendations 1 SELECT/page; audit 1 SELECT/page; policies
+constant 2 SELECT/page (1 on an empty page). No per-row growth
+on any feed; resolves the 13-B N+1 observations above.
+- `./mvnw.cmd clean test`: 1017 tests passing (1015 pre-13-F + 2 new),
+0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies all
+18 migrations in Testcontainers).
+
+Phase 13 (Production Hardening, slices 13-A through 13-F) is now
+complete, as scoped in the approved Phase 13 plan.
+Wait for explicit instruction before beginning new work.
