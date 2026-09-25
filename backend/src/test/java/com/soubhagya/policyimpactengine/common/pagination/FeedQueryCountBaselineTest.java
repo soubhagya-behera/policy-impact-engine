@@ -204,8 +204,9 @@ class FeedQueryCountBaselineTest {
 			//   Ideally 1; at most 2 is tolerated for provider-specific join
 			//   rendering, but it must NOT grow with N.
 			// - recommendations / audit: 1 constant (proxy-ID / scalar-only DTOs).
-			// - notifications / unread (NOT yet optimized): 1 + 2 per row
-			//   (EAGER assessment select-fetch + lazy newVersion load).
+			// - notifications / unread (Phase 13-F fix): fetch-join page query
+			//   over assessment + newVersion = constant (same tolerance as
+			//   assessments); must NOT grow with N.
 			assertThat(policies0).as("policies size=%d page=0", size)
 					.isEqualTo(rowsOnPage0 == 0 ? 1 : 2);
 			assertThat(policies1).as("policies size=%d page=1", size)
@@ -217,13 +218,13 @@ class FeedQueryCountBaselineTest {
 			assertThat(recs0).as("recommendations size=%d page=0", size).isEqualTo(1);
 			assertThat(recs1).as("recommendations size=%d page=1", size).isEqualTo(1);
 			assertThat(notifs0).as("notifications size=%d page=0", size)
-					.isEqualTo(1 + 2L * rowsOnPage0);
+					.isLessThanOrEqualTo(rowsOnPage0 == 0 ? 1 : 2);
 			assertThat(notifs1).as("notifications size=%d page=1", size)
-					.isEqualTo(1 + 2L * rowsOnPage1Final);
+					.isLessThanOrEqualTo(rowsOnPage1Final == 0 ? 1 : 2);
 			assertThat(unread0).as("unread size=%d page=0", size)
-					.isEqualTo(1 + 2L * rowsOnPage0);
+					.isLessThanOrEqualTo(rowsOnPage0 == 0 ? 1 : 2);
 			assertThat(unread1).as("unread size=%d page=1", size)
-					.isEqualTo(1 + 2L * rowsOnPage1Final);
+					.isLessThanOrEqualTo(rowsOnPage1Final == 0 ? 1 : 2);
 			assertThat(audit0).as("audit size=%d page=0", size).isEqualTo(1);
 			assertThat(audit1).as("audit size=%d page=1", size).isEqualTo(1);
 		}
@@ -271,10 +272,11 @@ class FeedQueryCountBaselineTest {
 		System.out.println("DIAGNOSE notifications size=2 statements=" + notifStmts
 				+ " policyVersionFetches=" + notifVersionFetches
 				+ " assessmentFetches=" + notifAssessmentFetches);
-		// Notifications NOT yet optimized: per-row assessment + version fetches remain.
-		assertThat(notifStmts).as("notification page statements").isEqualTo(5);
-		assertThat(notifVersionFetches).as("notification page version fetches").isEqualTo(2);
-		assertThat(notifAssessmentFetches).as("notification page assessment fetches").isEqualTo(2);
+		// Notifications (Phase 13-F fix): assessment + newVersion resolve in
+		// the page query — no per-row fetches.
+		assertThat(notifStmts).as("notification page statements").isLessThanOrEqualTo(2);
+		assertThat(notifVersionFetches).as("notification page version fetches").isEqualTo(0);
+		assertThat(notifAssessmentFetches).as("notification page assessment fetches").isEqualTo(0);
 	}
 
 	private long selects(Runnable read) {

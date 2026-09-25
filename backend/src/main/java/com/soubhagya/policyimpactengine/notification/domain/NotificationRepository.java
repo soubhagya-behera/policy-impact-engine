@@ -6,6 +6,8 @@ import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * Phase 10A — persistence for {@link Notification}.
@@ -52,4 +54,36 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 	 * unread predicate.
 	 */
 	List<Notification> findByAssessment_User_IdAndReadAtIsNull(UUID userId, Pageable pageable);
+
+	/**
+	 * Phase 13-F — paginated user-scoped listing with the assessment
+	 * and its new version fetched in the page query. Same rows,
+	 * ownership, and caller-supplied Sort as
+	 * {@link #findByAssessment_User_Id(UUID, Pageable)}; the DTO reads
+	 * {@code assessment.id} plus {@code newVersion} for every row, so
+	 * fetching exactly those two to-one associations turns the 1+2N
+	 * pattern (per-row EAGER assessment select plus per-row lazy
+	 * new-version load) into a constant page cost. Neither
+	 * {@code nv.policy}, {@code previousVersion}, {@code user}, nor any
+	 * other association is fetched: the DTO needs only the policy id
+	 * (served from the uninitialized proxy) and never reads the rest.
+	 */
+	@Query("SELECT n FROM Notification n "
+			+ "JOIN FETCH n.assessment a "
+			+ "JOIN FETCH a.newVersion nv "
+			+ "WHERE a.user.id = :userId")
+	List<Notification> findPagedWithAssessmentVersion(@Param("userId") UUID userId, Pageable pageable);
+
+	/**
+	 * Phase 13-F — paginated unread listing with the same fetch shape
+	 * as {@link #findPagedWithAssessmentVersion(UUID, Pageable)} plus
+	 * the unread predicate. Same rows, ownership, and caller-supplied
+	 * Sort as {@link #findByAssessment_User_IdAndReadAtIsNull(UUID, Pageable)}.
+	 */
+	@Query("SELECT n FROM Notification n "
+			+ "JOIN FETCH n.assessment a "
+			+ "JOIN FETCH a.newVersion nv "
+			+ "WHERE a.user.id = :userId AND n.readAt IS NULL")
+	List<Notification> findPagedUnreadWithAssessmentVersion(@Param("userId") UUID userId,
+			Pageable pageable);
 }

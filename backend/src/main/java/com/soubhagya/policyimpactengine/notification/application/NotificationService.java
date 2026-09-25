@@ -200,6 +200,11 @@ public class NotificationService {
 	 * deterministically across equal timestamps. Mapping stays inside
 	 * these read transactions; the existing unbounded methods stay for
 	 * internal callers.
+	 *
+	 * <p>Phase 13-F — reads through the fetch-join query so the
+	 * assessment and its new version resolve in the page query
+	 * (constant cost); rows, order, ownership, DTO shape, and
+	 * transaction are unchanged.
 	 */
 	@Transactional(readOnly = true)
 	public List<NotificationResponse> listNotificationResponsesPaged(
@@ -209,7 +214,7 @@ public class NotificationService {
 		}
 		FeedPagination pagination = FeedPagination.of(page, size);
 		Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
-		return notificationRepository.findByAssessment_User_Id(userId, pagination.pageRequest(sort))
+		return notificationRepository.findPagedWithAssessmentVersion(userId, pagination.pageRequest(sort))
 				.stream()
 				.map(NotificationResponse::from)
 				.toList();
@@ -219,6 +224,9 @@ public class NotificationService {
 	 * Phase 13-B — paginated unread feed; same contract as
 	 * {@link #listNotificationResponsesPaged(UUID, int, int)} plus the
 	 * unread predicate.
+	 *
+	 * <p>Phase 13-F — reads through the unread fetch-join query;
+	 * rows, order, ownership, DTO shape, and transaction are unchanged.
 	 */
 	@Transactional(readOnly = true)
 	public List<NotificationResponse> listUnreadNotificationResponsesPaged(
@@ -229,7 +237,7 @@ public class NotificationService {
 		FeedPagination pagination = FeedPagination.of(page, size);
 		Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
 		return notificationRepository
-				.findByAssessment_User_IdAndReadAtIsNull(userId, pagination.pageRequest(sort))
+				.findPagedUnreadWithAssessmentVersion(userId, pagination.pageRequest(sort))
 				.stream()
 				.map(NotificationResponse::from)
 				.toList();
