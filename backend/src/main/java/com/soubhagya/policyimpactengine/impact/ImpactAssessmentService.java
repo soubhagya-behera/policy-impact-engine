@@ -160,6 +160,10 @@ public class ImpactAssessmentService {
 	 * 100). The Sort carries the exact listing order (createdAt DESC,
 	 * id DESC). Mapping stays inside this read transaction; the
 	 * existing unbounded method stays for internal callers.
+	 *
+	 * <p>Phase 13-F — reads through the fetch-join query so both
+	 * version associations resolve in the page query (constant cost);
+	 * rows, order, ownership, DTO shape, and transaction are unchanged.
 	 */
 	@Transactional(readOnly = true)
 	public List<ImpactAssessmentSummaryResponse> listAssessmentSummariesPaged(
@@ -169,7 +173,7 @@ public class ImpactAssessmentService {
 		}
 		FeedPagination pagination = FeedPagination.of(page, size);
 		Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
-		return assessmentRepository.findByUser_Id(userId, pagination.pageRequest(sort)).stream()
+		return assessmentRepository.findPagedWithVersions(userId, pagination.pageRequest(sort)).stream()
 				.map(ImpactAssessmentSummaryResponse::from)
 				.toList();
 	}

@@ -6,6 +6,8 @@ import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * Phase 2Q — persistence for {@link ImpactAssessment}.
@@ -39,4 +41,24 @@ public interface ImpactAssessmentRepository extends JpaRepository<ImpactAssessme
 	 * bare list (limit/offset only, no count query).
 	 */
 	List<ImpactAssessment> findByUser_Id(UUID userId, Pageable pageable);
+
+	/**
+	 * Phase 13-F — paginated user-scoped listing with both version
+	 * associations fetched in the page query. Same rows, ownership,
+	 * and caller-supplied Sort as {@link #findByUser_Id(UUID, Pageable)};
+	 * the DTO reads {@code newVersion} and {@code previousVersion} for
+	 * every row, so fetching exactly those two to-one associations
+	 * turns the 1+2N lazy pattern into a constant page cost. Inner
+	 * joins are correct: {@code previous_version_id} is NOT NULL in
+	 * V7, {@code optional = false} on the mapping, the constructor
+	 * rejects null, and creation requires version &gt;= 2 with a
+	 * resolved predecessor. Neither {@code nv.policy} nor {@code user}
+	 * is fetched: the DTO needs only the policy id (served from the
+	 * uninitialized proxy) and never reads the user.
+	 */
+	@Query("SELECT a FROM ImpactAssessment a "
+			+ "JOIN FETCH a.newVersion nv "
+			+ "JOIN FETCH a.previousVersion pv "
+			+ "WHERE a.user.id = :userId")
+	List<ImpactAssessment> findPagedWithVersions(@Param("userId") UUID userId, Pageable pageable);
 }
