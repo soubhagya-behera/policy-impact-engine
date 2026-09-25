@@ -513,7 +513,7 @@ Implementation proceeds through the approved roadmap below. Phases are **vertica
 | 12 | **Optional Local AI** | Ollama integration for natural-language explanations only; advisory layer; deterministic engine remains authoritative (ADR-006). **IMPLEMENTED** (Phase 12, per ADR-024): user-triggered `POST /api/v1/me/impact-assessments/{id}/explanation`, provider abstraction with local Ollama HTTP implementation, deterministic fallback (safe default `ai.enabled=false`), ephemeral non-persisted prose with authoritative DB-echoed facts; no cloud/chat/caching/persistence. |
 | 13 | **Production Hardening** | Rate limiting; observability (Actuator); query indexes via Flyway migrations; Dockerization and deployment decisions. *New dependencies: Actuator; rate-limiting library if needed.* Delivered incrementally: **13-A/13-B/13-C IMPLEMENTED** (indexes, pagination, rate limiting); **13-D IMPLEMENTED** (minimal Actuator health/info per ADR-027, locked security headers, deny-by-default CORS, preflight-only rate-limit bypass — see DECISIONS.md ADR-027); **13-E IMPLEMENTED** (containerized local deployment per ADR-028: multi-stage image, Compose PostgreSQL stack, env-only secrets, 401-asserting healthchecks, optional off-by-default Ollama profile — see DECISIONS.md ADR-028); **13-F IMPLEMENTED** (feed N+1 mitigation on the paged paths only: fetch-join `newVersion` + `previousVersion` for assessments, `assessment` + `newVersion` for notifications/unread; no `FetchType`/EAGER change, no migration, no response/pagination/isolation change). |
 
-Current position: **Phase 0 complete; Phase 1 is next** (see PROJECT_STATUS.md).
+Current position: **Phase 13 complete (13-A through 13-F)** (see PROJECT_STATUS.md). No later phase has been started or implemented.
 
 
 
