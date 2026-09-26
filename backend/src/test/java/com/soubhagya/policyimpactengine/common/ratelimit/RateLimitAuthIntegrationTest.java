@@ -62,12 +62,18 @@ class RateLimitAuthIntegrationTest {
 	@Autowired
 	private AuditEventRepository auditEventRepository;
 
+	// Phase 14-A/3a: successful logins persist refresh rows referencing
+	// users, so refresh rows go before user deletion.
+	@Autowired
+	private com.soubhagya.policyimpactengine.user.domain.RefreshTokenRepository refreshTokenRepository;
+
 	@Autowired
 	private ObjectMapper objectMapper;
 
 	@BeforeEach
 	void clean() {
 		auditEventRepository.deleteAll();
+		refreshTokenRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 

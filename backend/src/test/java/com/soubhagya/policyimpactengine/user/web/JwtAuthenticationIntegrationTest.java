@@ -95,9 +95,15 @@ class JwtAuthenticationIntegrationTest {
 	@Autowired
 	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
 
+	// Phase 14-A/3a: successful logins persist refresh rows referencing
+	// the user, so refresh rows go before user deletion (actor FK first).
+	@Autowired
+	private com.soubhagya.policyimpactengine.user.domain.RefreshTokenRepository refreshTokenRepository;
+
 	@BeforeEach
 	void clean() {
 		auditEventRepository.deleteAll();
+		refreshTokenRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 

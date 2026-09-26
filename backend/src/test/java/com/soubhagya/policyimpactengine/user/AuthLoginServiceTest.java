@@ -26,8 +26,14 @@ import com.soubhagya.policyimpactengine.user.domain.UserRepository;
  * Phase 8B — deterministic unit tests for {@link AuthLoginService}.
  *
  * <p>No Spring context, no database. A real {@link BCryptPasswordEncoder}
- * proves verification; the repository and {@link JwtService} are mocked.
- * Every failure case must yield the same exception and message.
+ * proves verification; the repositories and {@link JwtService} are
+ * mocked, as is {@link AuthRefreshService}. Every failure case must
+ * yield the same exception and message.
+ *
+ * <p>Phase 14-A/3a covers the atomic initial issuance: success
+ * persists one refresh row in the login transaction, and any issuance
+ * failure becomes the uniform credential failure with nothing
+ * persisted.
  */
 @ExtendWith(MockitoExtension.class)
 class AuthLoginServiceTest {
@@ -40,13 +46,17 @@ class AuthLoginServiceTest {
 	@Mock
 	private JwtService jwtService;
 
+	@Mock
+	private AuthRefreshService refreshService;
+
 	private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
 	private AuthLoginService service;
 
 	@BeforeEach
 	void setUp() {
-		service = new AuthLoginService(userRepository, passwordEncoder, jwtService);
+		service = new AuthLoginService(userRepository, passwordEncoder, jwtService,
+				refreshService);
 	}
 
 	@Test
@@ -55,14 +65,33 @@ class AuthLoginServiceTest {
 		when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
 		when(jwtService.issueAccessToken(user.getId())).thenReturn("token-for-user");
 		when(jwtService.accessTokenExpiresInSeconds()).thenReturn(900L);
+		when(refreshService.issueRefreshToken(user.getId())).thenReturn(
+				new RefreshResult(user.getId(), "raw-refresh-token",
+						java.time.Instant.parse("2026-10-26T10:00:00Z"), 2_592_000L));
 
 		LoginResult result = service.login("  User@Example.COM ", PASSWORD);
 
 		assertThat(result.userId()).isEqualTo(user.getId());
 		assertThat(result.accessToken()).isEqualTo("token-for-user");
 		assertThat(result.expiresInSeconds()).isEqualTo(900L);
+		assertThat(result.refreshToken()).isEqualTo("raw-refresh-token");
+		assertThat(result.refreshExpiresInSeconds()).isEqualTo(2_592_000L);
 		assertThat(result.toString()).doesNotContain(PASSWORD);
 		verify(jwtService).issueAccessToken(user.getId());
+		verify(refreshService).issueRefreshToken(user.getId());
+	}
+
+	@Test
+	void refreshIssuanceFailureFailsWithUniformMessage() throws Exception {
+		User user = credentialedUser("user@example.com", PASSWORD);
+		when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+		when(refreshService.issueRefreshToken(user.getId()))
+				.thenThrow(new RuntimeException("forced persistence failure"));
+
+		assertThatThrownBy(() -> service.login("user@example.com", PASSWORD))
+				.isInstanceOf(InvalidCredentialsException.class)
+				.hasMessage(AuthLoginService.INVALID_CREDENTIALS_MESSAGE);
+		verify(jwtService, never()).issueAccessToken(any());
 	}
 
 	@Test
@@ -73,6 +102,7 @@ class AuthLoginServiceTest {
 				.isInstanceOf(InvalidCredentialsException.class)
 				.hasMessage(AuthLoginService.INVALID_CREDENTIALS_MESSAGE);
 		verify(jwtService, never()).issueAccessToken(any());
+		verify(refreshService, never()).issueRefreshToken(any());
 	}
 
 	@Test
@@ -84,6 +114,7 @@ class AuthLoginServiceTest {
 				.isInstanceOf(InvalidCredentialsException.class)
 				.hasMessage(AuthLoginService.INVALID_CREDENTIALS_MESSAGE);
 		verify(jwtService, never()).issueAccessToken(any());
+		verify(refreshService, never()).issueRefreshToken(any());
 	}
 
 	@Test
@@ -109,6 +140,7 @@ class AuthLoginServiceTest {
 
 		verify(userRepository, never()).findByEmail(any());
 		verify(jwtService, never()).issueAccessToken(any());
+		verify(refreshService, never()).issueRefreshToken(any());
 	}
 
 	private User credentialedUser(String email, String rawPassword) throws Exception {

@@ -117,6 +117,9 @@ class ExplanationIntegrationTest {
 	@Autowired private NotificationRepository notificationRepository;
 	@Autowired private UserPrivacyPreferenceRepository preferenceRepository;
 	@Autowired private AuditEventRepository auditEventRepository;
+	// Phase 14-A/3a: refresh-first (user FK).
+	@Autowired
+	private com.soubhagya.policyimpactengine.user.domain.RefreshTokenRepository refreshTokenRepository;
 	@Autowired private AiExplanationService explanationService;
 	@Autowired private JdbcTemplate jdbcTemplate;
 	@Autowired private ObjectMapper objectMapper;
@@ -138,6 +141,7 @@ class ExplanationIntegrationTest {
 		attemptRepository.deleteAll();
 		policyRepository.deleteAll();
 		preferenceRepository.deleteAll();
+		refreshTokenRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 

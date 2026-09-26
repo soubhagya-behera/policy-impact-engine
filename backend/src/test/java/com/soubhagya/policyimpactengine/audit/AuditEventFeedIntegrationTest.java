@@ -70,6 +70,9 @@ class AuditEventFeedIntegrationTest {
 	@Autowired private AuditService auditService;
 	@Autowired private JwtService jwtService;
 	@Autowired private AuditEventRepository auditEventRepository;
+	// Phase 14-A/3a: refresh-first (user FK).
+	@Autowired
+	private com.soubhagya.policyimpactengine.user.domain.RefreshTokenRepository refreshTokenRepository;
 	@Autowired private JdbcTemplate jdbcTemplate;
 	@Autowired private ObjectMapper objectMapper;
 
@@ -79,6 +82,7 @@ class AuditEventFeedIntegrationTest {
 		auditEventRepository.deleteAll();
 		preferenceRepository.deleteAll();
 		policyRepository.deleteAll();
+		refreshTokenRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 

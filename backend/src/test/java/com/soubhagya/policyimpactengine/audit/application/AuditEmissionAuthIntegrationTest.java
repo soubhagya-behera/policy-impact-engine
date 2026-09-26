@@ -26,6 +26,7 @@ import com.soubhagya.policyimpactengine.user.AuthLoginService;
 import com.soubhagya.policyimpactengine.user.AuthRegistrationService;
 import com.soubhagya.policyimpactengine.user.DuplicateEmailException;
 import com.soubhagya.policyimpactengine.user.InvalidCredentialsException;
+import com.soubhagya.policyimpactengine.user.domain.RefreshTokenRepository;
 import com.soubhagya.policyimpactengine.user.domain.UserRepository;
 import com.soubhagya.policyimpactengine.user.web.AuthController;
 import com.soubhagya.policyimpactengine.user.web.dto.LoginRequest;
@@ -51,12 +52,14 @@ class AuditEmissionAuthIntegrationTest {
 	@Autowired private AuthLoginService loginService;
 	@Autowired private AuthController authController;
 	@Autowired private UserRepository userRepository;
+	@Autowired private RefreshTokenRepository refreshTokenRepository;
 	@Autowired private AuditEventRepository auditEventRepository;
 	@Autowired private JdbcTemplate jdbcTemplate;
 
 	@BeforeEach
 	void clean() {
 		auditEventRepository.deleteAll();
+		refreshTokenRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 
@@ -142,6 +145,38 @@ class AuditEmissionAuthIntegrationTest {
 	}
 
 	@Test
+	void successfulLoginPersistsOneUsableRefreshRow() {
+		UUID id = authController
+				.register(new RegisterRequest("user@example.com", "correct-horse-1"))
+				.getBody().id();
+		String refreshToken = authController
+				.login(new LoginRequest("user@example.com", "correct-horse-1"))
+				.getBody().refreshToken();
+
+		assertThat(refreshToken).isNotBlank();
+		assertThat(refreshTokenRepository.count()).isEqualTo(1);
+		assertThat(refreshTokenRepository.findAll().get(0).getTokenHash())
+				.isEqualTo(sha256Hex(refreshToken));
+		assertThat(refreshTokenRepository.findAll().get(0).getUser().getId())
+				.isEqualTo(id);
+	}
+
+	@Test
+	void refreshTokenNeverAppearsInAuditData() {
+		authController.register(new RegisterRequest("user@example.com", "correct-horse-1"));
+		String refreshToken = authController
+				.login(new LoginRequest("user@example.com", "correct-horse-1"))
+				.getBody().refreshToken();
+
+		assertThat(refreshToken).isNotBlank();
+		List<String> metadata = jdbcTemplate.queryForList(
+				"SELECT metadata FROM audit_event", String.class);
+		assertThat(metadata).isNotEmpty();
+		assertThat(metadata).noneMatch(
+				value -> value != null && value.contains(refreshToken));
+	}
+
+	@Test
 	void auditFailureDoesNotRollBackRegistration() {
 		AuditService failingAudit = mock(AuditService.class);
 		doThrow(new AuditAppendException("forced audit failure", null))
@@ -155,6 +190,23 @@ class AuditEmissionAuthIntegrationTest {
 
 		assertThat(userRepository.findByEmail("user@example.com")).isPresent();
 		assertThat(auditEventRepository.count()).isZero();
+	}
+
+	@Test
+	void auditFailureDoesNotRollBackLoginRefreshRow() {
+		authController.register(new RegisterRequest("user@example.com", "correct-horse-1"));
+		AuditService failingAudit = mock(AuditService.class);
+		doThrow(new AuditAppendException("forced audit failure", null))
+				.when(failingAudit).append(any(), any(), any(), any(), any(), any());
+		AuthController failingController = new AuthController(registrationService,
+				loginService, failingAudit);
+
+		assertThatThrownBy(() -> failingController
+				.login(new LoginRequest("user@example.com", "correct-horse-1")))
+				.isInstanceOf(AuditAppendException.class);
+
+		assertThat(refreshTokenRepository.count()).isEqualTo(1);
+		assertThat(countByType("AUTH_LOGIN_SUCCEEDED")).isZero();
 	}
 
 	@Test
@@ -190,5 +242,26 @@ class AuditEmissionAuthIntegrationTest {
 		return jdbcTemplate.queryForList("SELECT actor_user_id, resource_type, resource_id, "
 				+ "metadata FROM audit_event WHERE event_type = ? ORDER BY occurred_at, id",
 				eventType);
+	}
+
+	/**
+	 * Independent JDK SHA-256 oracle for asserting the persisted
+	 * digest matches the returned raw token (the service helper is
+	 * package-private to the user module).
+	 */
+	private static String sha256Hex(String rawToken) {
+		try {
+			byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+					.digest(rawToken.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			StringBuilder hex = new StringBuilder(64);
+			for (byte b : digest) {
+				hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+				hex.append(Character.forDigit(b & 0xF, 16));
+			}
+			return hex.toString();
+		}
+		catch (java.security.NoSuchAlgorithmException missing) {
+			throw new IllegalStateException("SHA-256 unavailable", missing);
+		}
 	}
 }

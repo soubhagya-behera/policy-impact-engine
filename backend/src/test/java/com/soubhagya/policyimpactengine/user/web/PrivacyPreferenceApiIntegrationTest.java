@@ -111,6 +111,10 @@ class PrivacyPreferenceApiIntegrationTest {
 	@Autowired
 	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository; // 11C: audit-first (actor FK)
 
+	// Phase 14-A/3a: refresh-first (user FK).
+	@Autowired
+	private com.soubhagya.policyimpactengine.user.domain.RefreshTokenRepository refreshTokenRepository;
+
 	@BeforeEach
 	void clean() {
 		auditEventRepository.deleteAll();
@@ -122,6 +126,7 @@ class PrivacyPreferenceApiIntegrationTest {
 		versionRepository.deleteAll();
 		policyRepository.deleteAll();
 		preferenceRepository.deleteAll();
+		refreshTokenRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 

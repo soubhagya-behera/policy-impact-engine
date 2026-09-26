@@ -66,7 +66,8 @@ class AuthControllerLoginTest {
 	void loginReturnsBearerTokenResponseWithoutCredentialMaterial() throws Exception {
 		UUID userId = UUID.randomUUID();
 		when(loginService.login("user@example.com", "correct-horse-1"))
-				.thenReturn(new LoginResult(userId, "issued-token", 900L));
+				.thenReturn(new LoginResult(userId, "issued-token", 900L,
+						"issued-refresh-token", 2_592_000L));
 
 		mockMvc.perform(post("/api/v1/auth/login")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -77,8 +78,11 @@ class AuthControllerLoginTest {
 				.andExpect(jsonPath("$.accessToken").value("issued-token"))
 				.andExpect(jsonPath("$.tokenType").value("Bearer"))
 				.andExpect(jsonPath("$.expiresIn").value(900))
+				.andExpect(jsonPath("$.refreshToken").value("issued-refresh-token"))
+				.andExpect(jsonPath("$.refreshExpiresIn").value(2_592_000))
 				.andExpect(jsonPath("$.password").doesNotExist())
 				.andExpect(jsonPath("$.passwordHash").doesNotExist())
+				.andExpect(jsonPath("$.tokenHash").doesNotExist())
 				.andExpect(jsonPath("$.email").doesNotExist());
 
 		verify(loginService).login("user@example.com", "correct-horse-1");

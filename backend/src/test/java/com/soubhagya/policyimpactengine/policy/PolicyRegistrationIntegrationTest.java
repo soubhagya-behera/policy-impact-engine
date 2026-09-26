@@ -67,10 +67,16 @@ class PolicyRegistrationIntegrationTest {
 	@Autowired
 	private com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
 
+	// Phase 14-A/3a: successful logins persist refresh rows referencing
+	// users, so refresh rows go before user deletion.
+	@Autowired
+	private com.soubhagya.policyimpactengine.user.domain.RefreshTokenRepository refreshTokenRepository;
+
 	@BeforeEach
 	void cleanDatabase() {
 		auditEventRepository.deleteAll();
 		repository.deleteAll();
+		refreshTokenRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 

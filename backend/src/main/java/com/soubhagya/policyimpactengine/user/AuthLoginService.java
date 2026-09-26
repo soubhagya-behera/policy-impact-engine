@@ -24,6 +24,16 @@ import com.soubhagya.policyimpactengine.user.domain.UserRepository;
  * attempts additionally run a BCrypt match against the static dummy
  * hash below (timing equalization only — it is not a secret and the
  * taken branch is never exposed).
+ *
+ * <p>Phase 14-A/3a issues the initial refresh token atomically with
+ * the successful login (see DECISIONS.md ADR-029): the login
+ * transaction is read-write, and the refresh row persists in that
+ * same transaction through the REQUIRED transaction of
+ * {@link AuthRefreshService#issueRefreshToken}. Any persistence or
+ * runtime failure from issuance alone becomes the existing uniform
+ * {@link InvalidCredentialsException} and rolls the login back —
+ * never a 200 without a usable refresh token. Credential validation
+ * is untouched and never enters that translation.
  */
 @Service
 public class AuthLoginService {
@@ -41,9 +51,10 @@ public class AuthLoginService {
 	private final UserRepository userRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final JwtService jwtService;
+	private final AuthRefreshService refreshService;
 
 	public AuthLoginService(UserRepository userRepository, PasswordEncoder passwordEncoder,
-			JwtService jwtService) {
+			JwtService jwtService, AuthRefreshService refreshService) {
 		if (userRepository == null) {
 			throw new IllegalArgumentException("UserRepository must not be null");
 		}
@@ -53,12 +64,16 @@ public class AuthLoginService {
 		if (jwtService == null) {
 			throw new IllegalArgumentException("JwtService must not be null");
 		}
+		if (refreshService == null) {
+			throw new IllegalArgumentException("RefreshService must not be null");
+		}
 		this.userRepository = userRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtService = jwtService;
+		this.refreshService = refreshService;
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public LoginResult login(String email, String rawPassword) {
 		String normalized = AuthRegistrationService.normalizeEmail(email);
 		if (!passwordLengthPolicySatisfied(rawPassword)) {
@@ -74,8 +89,25 @@ public class AuthLoginService {
 			throw new InvalidCredentialsException(INVALID_CREDENTIALS_MESSAGE);
 		}
 		UUID userId = user.orElseThrow().getId();
+		RefreshResult refresh = issueInitialRefreshToken(userId);
 		return new LoginResult(userId, jwtService.issueAccessToken(userId),
-				jwtService.accessTokenExpiresInSeconds());
+				jwtService.accessTokenExpiresInSeconds(),
+				refresh.refreshToken(), refresh.expiresInSeconds());
+	}
+
+	/**
+	 * Persists the initial refresh-token row inside the login
+	 * transaction. Only failures from this issuance call translate to
+	 * the uniform credential failure (ADR-029 §3); credential
+	 * validation above never passes through here.
+	 */
+	private RefreshResult issueInitialRefreshToken(UUID userId) {
+		try {
+			return refreshService.issueRefreshToken(userId);
+		}
+		catch (RuntimeException issuanceFailure) {
+			throw new InvalidCredentialsException(INVALID_CREDENTIALS_MESSAGE);
+		}
 	}
 
 	private static boolean passwordLengthPolicySatisfied(String rawPassword) {

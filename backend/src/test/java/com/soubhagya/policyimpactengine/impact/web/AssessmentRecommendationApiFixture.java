@@ -127,6 +127,11 @@ abstract class AssessmentRecommendationApiFixture {
 	@Autowired
 	protected com.soubhagya.policyimpactengine.audit.domain.AuditEventRepository auditEventRepository;
 
+	// Phase 14-A/3a: successful logins persist refresh rows referencing
+	// users, so refresh rows go before user deletion.
+	@Autowired
+	protected com.soubhagya.policyimpactengine.user.domain.RefreshTokenRepository refreshTokenRepository;
+
 	@BeforeEach
 	void clean() {
 		auditEventRepository.deleteAll();
@@ -140,6 +145,7 @@ abstract class AssessmentRecommendationApiFixture {
 		versionRepository.deleteAll();
 		policyRepository.deleteAll();
 		preferenceRepository.deleteAll();
+		refreshTokenRepository.deleteAll();
 		userRepository.deleteAll();
 	}
 
