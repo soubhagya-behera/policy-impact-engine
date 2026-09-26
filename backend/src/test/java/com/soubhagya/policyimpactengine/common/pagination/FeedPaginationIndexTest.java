@@ -15,7 +15,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * Phase 13-B — guards the V18 index baseline the paginated feeds rely
  * on (see DECISIONS.md ADR-026 §11). Asserts the two proven covering
  * indexes exist with their exact column orderings, and that no
- * migration beyond V18 is present. No query behavior is tested here;
+ * migration beyond V19 is present. No query behavior is tested here;
  * feed ordering and pagination behavior live in the feed integration
  * tests. EXPLAIN evidence for these indexes was recorded during
  * Phase 13-A/13-B planning, not as brittle committed assertions.
@@ -40,17 +40,17 @@ class FeedPaginationIndexTest {
 	}
 
 	@Test
-	void schemaVersionIsExactlyV18() {
+	void schemaVersionIsExactlyV19() {
 		Integer applied = jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM flyway_schema_history WHERE success = true",
 				Integer.class);
-		assertThat(applied).isEqualTo(18);
+		assertThat(applied).isEqualTo(19);
 
 		String latest = jdbcTemplate.queryForObject(
 				"SELECT version FROM flyway_schema_history WHERE success = true"
 						+ " ORDER BY installed_rank DESC LIMIT 1",
 				String.class);
-		assertThat(latest).isEqualTo("18");
+		assertThat(latest).isEqualTo("19");
 	}
 
 	private String indexDefinition(String indexName) {
