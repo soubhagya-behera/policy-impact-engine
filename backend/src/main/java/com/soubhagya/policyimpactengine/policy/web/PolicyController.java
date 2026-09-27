@@ -19,8 +19,11 @@ import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
 import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService;
 import com.soubhagya.policyimpactengine.policy.web.dto.CreatePolicyRequest;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
+import com.soubhagya.policyimpactengine.policy.web.dto.VersionDetailResponse;
+import com.soubhagya.policyimpactengine.policy.web.dto.VersionSummaryResponse;
 import com.soubhagya.policyimpactengine.user.web.AuthenticatedUsers;
 
 import jakarta.validation.Valid;
@@ -44,13 +47,16 @@ import jakarta.validation.Valid;
 public class PolicyController {
 
 	private final PolicyService service;
+	private final PolicyVersionReadService versions;
 	private final AuditService auditService;
 
-	public PolicyController(PolicyService service, AuditService auditService) {
-		if (service == null || auditService == null) {
+	public PolicyController(PolicyService service, PolicyVersionReadService versions,
+			AuditService auditService) {
+		if (service == null || versions == null || auditService == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.service = service;
+		this.versions = versions;
 		this.auditService = auditService;
 	}
 
@@ -85,6 +91,36 @@ public class PolicyController {
 	public PolicyResponse getById(Authentication authentication, @PathVariable UUID id) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
 		return service.get(userId, id);
+	}
+
+	/**
+	 * Phase 14-B/1 — paginated owner-scoped version history (ADR-026):
+	 * bare JSON array in version-number ascending order, windowed by
+	 * {@code page}/{@code size} (defaults 0/20, maximum 100). Identity
+	 * still comes only from the principal; the principal is resolved
+	 * before pagination is validated so unauthenticated callers stay
+	 * 401. A foreign or unknown policy yields an empty page.
+	 */
+	@GetMapping("/{policyId}/versions")
+	public List<VersionSummaryResponse> listVersions(Authentication authentication,
+			@PathVariable UUID policyId,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return versions.list(userId, policyId, pagination.page(), pagination.size());
+	}
+
+	/**
+	 * Phase 14-B/1 — single owner-scoped version snapshot. A foreign
+	 * or unknown version, or a version belonging to a different
+	 * policy than requested, behaves as not-found.
+	 */
+	@GetMapping("/{policyId}/versions/{versionId}")
+	public VersionDetailResponse getVersion(Authentication authentication,
+			@PathVariable UUID policyId, @PathVariable UUID versionId) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		return versions.get(userId, policyId, versionId);
 	}
 
 }

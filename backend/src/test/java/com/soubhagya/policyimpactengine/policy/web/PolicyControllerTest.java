@@ -51,6 +51,11 @@ class PolicyControllerTest {
 	@MockitoBean
 	private PolicyService service;
 
+	// Phase 14-B/1: PolicyController also serves the version-history
+	// reads; mocked so this slice stays isolated.
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService versions;
+
 	// Phase 11C: PolicyController emits POLICY_REGISTERED post-commit;
 	// mocked so this slice stays isolated from the audit chain.
 	@MockitoBean

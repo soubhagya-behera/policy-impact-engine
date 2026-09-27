@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
@@ -15,6 +16,12 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * sequence-order listing, and standard save support from
  * {@link JpaRepository}. No update or custom delete operations are provided;
  * versions are immutable and append-only.
+ *
+ * <p>Phase 14-B/1 adds the owner-scoped reads backing the version
+ * history REST surface: ownership chains through
+ * {@code version.policy.owner}, so cross-user rows behave as
+ * not-found. Windowed listings take a caller-supplied
+ * {@link Pageable} carrying the exact feed ordering.
  */
 public interface PolicyVersionRepository extends JpaRepository<PolicyVersion, UUID> {
 
@@ -34,5 +41,22 @@ public interface PolicyVersionRepository extends JpaRepository<PolicyVersion, UU
 	 * Returns all versions for a policy in sequence order.
 	 */
 	List<PolicyVersion> findByPolicy_IdOrderByVersionNumberAsc(UUID policyId);
+
+	/**
+	 * Phase 14-B/1 — windowed owner-scoped version listing for the
+	 * history feed. A foreign or unknown policy behaves as an empty
+	 * result. The {@link Pageable} carries the exact feed ordering
+	 * (version number ascending).
+	 */
+	List<PolicyVersion> findByPolicy_IdAndPolicy_Owner_Id(UUID policyId, UUID ownerId,
+			Pageable pageable);
+
+	/**
+	 * Phase 14-B/1 — single-version lookup scoped to the owning user
+	 * for the version-detail endpoint. A foreign or unknown version
+	 * behaves as not-found; callers additionally verify the version
+	 * belongs to the requested policy.
+	 */
+	Optional<PolicyVersion> findByIdAndPolicy_Owner_Id(UUID id, UUID ownerId);
 
 }
