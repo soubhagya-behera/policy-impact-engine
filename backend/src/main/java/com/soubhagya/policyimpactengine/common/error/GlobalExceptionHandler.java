@@ -20,6 +20,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import com.soubhagya.policyimpactengine.user.AuthenticationRequiredException;
 import com.soubhagya.policyimpactengine.user.DuplicateEmailException;
 import com.soubhagya.policyimpactengine.user.InvalidCredentialsException;
+import com.soubhagya.policyimpactengine.user.InvalidRefreshTokenException;
 
 /**
  * Global RFC 7807 error handling. All error responses use
@@ -43,7 +44,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		return problem(HttpStatus.CONFLICT, "Already registered", ex.getMessage());
 	}
 
-	@ExceptionHandler({ InvalidCredentialsException.class, AuthenticationRequiredException.class })
+	@ExceptionHandler({ InvalidCredentialsException.class, AuthenticationRequiredException.class,
+			InvalidRefreshTokenException.class })
 	public ProblemDetail handleUnauthenticated(RuntimeException ex) {
 		return problem(HttpStatus.UNAUTHORIZED, "Unauthenticated", ex.getMessage());
 	}

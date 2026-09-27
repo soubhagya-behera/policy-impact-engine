@@ -50,6 +50,8 @@ class AuditEmissionAuthIntegrationTest {
 
 	@Autowired private AuthRegistrationService registrationService;
 	@Autowired private AuthLoginService loginService;
+	@Autowired private com.soubhagya.policyimpactengine.user.AuthRefreshService refreshService;
+	@Autowired private com.soubhagya.policyimpactengine.user.JwtService jwtService;
 	@Autowired private AuthController authController;
 	@Autowired private UserRepository userRepository;
 	@Autowired private RefreshTokenRepository refreshTokenRepository;
@@ -182,7 +184,7 @@ class AuditEmissionAuthIntegrationTest {
 		doThrow(new AuditAppendException("forced audit failure", null))
 				.when(failingAudit).append(any(), any(), any(), any(), any(), any());
 		AuthController failingController = new AuthController(registrationService,
-				loginService, failingAudit);
+				loginService, refreshService, jwtService, failingAudit);
 
 		assertThatThrownBy(() -> failingController
 				.register(new RegisterRequest("user@example.com", "correct-horse-1")))
@@ -199,7 +201,7 @@ class AuditEmissionAuthIntegrationTest {
 		doThrow(new AuditAppendException("forced audit failure", null))
 				.when(failingAudit).append(any(), any(), any(), any(), any(), any());
 		AuthController failingController = new AuthController(registrationService,
-				loginService, failingAudit);
+				loginService, refreshService, jwtService, failingAudit);
 
 		assertThatThrownBy(() -> failingController
 				.login(new LoginRequest("user@example.com", "correct-horse-1")))

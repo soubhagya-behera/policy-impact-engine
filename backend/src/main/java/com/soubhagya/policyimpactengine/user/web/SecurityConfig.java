@@ -35,8 +35,9 @@ import jakarta.servlet.http.HttpServletResponse;
  *
  * <p>Stateless REST posture: CSRF, HTTP Basic, form login, and logout
  * are disabled and no server-side session is ever created.
- * {@code POST /api/v1/auth/register} and
- * {@code POST /api/v1/auth/login} stay permitted; everything else
+ * {@code POST /api/v1/auth/register},
+ * {@code POST /api/v1/auth/login}, and
+ * {@code POST /api/v1/auth/refresh} stay permitted; everything else
  * defaults to authenticated so every endpoint added after this slice
  * is locked unless explicitly opened.
  *
@@ -99,6 +100,7 @@ public class SecurityConfig {
 						.dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
 						.requestMatchers(HttpMethod.OPTIONS, "/api/**").permitAll()
 						.anyRequest().authenticated())
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

@@ -46,6 +46,14 @@ class AuthControllerTest {
 	@MockitoBean
 	private AuthLoginService loginService;
 
+	// Phase 14-A/3b: refresh rotation dependencies; mocked so the
+	// registration slice stays isolated.
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.user.AuthRefreshService refreshService;
+
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.user.JwtService jwtService;
+
 	// Phase 11C: AuthController emits audit events post-commit; mocked
 	// so this slice stays isolated from the audit chain.
 	@MockitoBean
