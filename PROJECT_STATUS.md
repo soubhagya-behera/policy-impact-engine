@@ -767,7 +767,9 @@ chain otherwise identical to 8A plus login permitAll; no V17
 (V1–V16 untouched), no refresh/roles/admin/OAuth2, no
 notification/scheduler/scoring changes; documented in ADR-018).
 
-Phase 8C (refresh tokens) NOT implemented.
+Phase 8C (refresh tokens) need demonstrated — delivered as Phase 14-A
+(see the Phase 14-A entry at the end of this file and DECISIONS.md
+ADR-029).
 
 Authenticated policy hardening slice implemented and tested successfully
 (owner-scoped policy boundary; see DECISIONS.md ADR-019):
@@ -1302,4 +1304,52 @@ on any feed; resolves the 13-B N+1 observations above.
 
 Phase 13 (Production Hardening, slices 13-A through 13-F) is now
 complete, as scoped in the approved Phase 13 plan.
+
+Phase 14-A slice implemented and tested successfully
+(refresh-token authentication lifecycle, per DECISIONS.md ADR-029):
+- 14-A/1 configuration: `security.jwt.refresh-token-ttl`
+(default `PT720H`, absolute lifetime, no sliding renewal, positive
+fail-fast like the JWT secret) plus the reserved
+`rate-limit.refresh-window` / `rate-limit.refresh-max-requests`
+(defaults `PT1M` / 10); no behavior change in this slice
+- 14-A/2a V19 persistence: `auth_refresh_token` table (`user_id`
+FK, `token_hash` UNIQUE, validity window, `revoked_at`,
+successor link) with the expired-row purge discipline; raw tokens
+never touch the database (SHA-256 hex digests only); V1–V18
+untouched
+- 14-A/2b rotation/reuse service: `AuthRefreshService` single-use
+rotation (atomic consume + successor insert, exactly one
+concurrent winner, no Java locks), reuse containment (a
+superseded presentation revokes all live tokens of the owning
+user), uniform `InvalidRefreshTokenException` for unknown,
+expired, revoked, reused, and concurrent-loser cases, and
+scheduled expired-row purge
+- 14-A/3a login issuance: the initial refresh-token row persists
+atomically in the login transaction (failure → the existing
+uniform 401, never a 200 without a usable refresh token); audit
+emission stays post-commit and isolated
+- 14-A/3b refresh endpoint: anonymous
+`POST /api/v1/auth/refresh` (`{refreshToken}` → 200
+`{accessToken,tokenType:"Bearer",expiresIn,refreshToken,refreshExpiresIn}`;
+identity only from the rotation result; no transaction, audit, or
+raw-token logging in the controller;
+`InvalidRefreshTokenException` → 401 `"Unauthenticated"` /
+`"Invalid refresh token"`; missing/blank → 400; access-token
+claims/TTL unchanged)
+- 14-A/3c refresh rate limiting: separate `auth-refresh:<ip>`
+tier at 10/min/IP wired in `RateLimitFilter` before the generic
+`/api/**` fallthrough (`X-Forwarded-For` untrusted); over-limit
+→ the existing 429 `application/problem+json` + `Retry-After`
+before controller validation/rotation; login/register budgets
+unaffected
+- `./mvnw.cmd clean test`: 1085 tests passing, 0 failures, 0 errors,
+BUILD SUCCESS (Flyway validates/applies all 19 migrations in
+Testcontainers)
+- Deferred exactly as ADR-029 says: logout (revoke-current/all),
+refresh-token reuse audit event (CHECK-constraint migration
+follow-up), successor-grace for racing clients, and sliding TTL
+(the absolute lifetime stands); no Phase 14-B implementation
+
+Phase 14-A (refresh-token lifecycle, slices 14-A/1 through
+14-A/3c) is now complete, as scoped in ADR-029.
 Wait for explicit instruction before beginning new work.
