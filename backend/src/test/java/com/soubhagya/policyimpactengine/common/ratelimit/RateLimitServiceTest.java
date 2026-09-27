@@ -79,6 +79,29 @@ class RateLimitServiceTest {
 	}
 
 	@Test
+	void refreshTierHasOwnIpBucketSeparateFromAuthTiers() {
+		RateLimitService service = service(Clock.fixed(START, ZoneOffset.UTC));
+
+		for (int i = 0; i < 10; i++) {
+			assertThat(service.refreshAttempt("203.0.113.7").allowed()).isTrue();
+		}
+		RateLimitService.Decision rejected = service.refreshAttempt("203.0.113.7");
+		assertThat(rejected.allowed()).isFalse();
+		assertThat(rejected.retryAfterSeconds()).isGreaterThanOrEqualTo(1);
+
+		assertThat(service.refreshAttempt("203.0.113.8").allowed()).isTrue();
+
+		assertThat(service.registerAttempt("203.0.113.7").allowed()).isTrue();
+		assertThat(service.loginAttempt("203.0.113.7").allowed()).isTrue();
+		assertThat(service.anonymousRequest("203.0.113.7").allowed()).isTrue();
+
+		assertThatThrownBy(() -> service.refreshAttempt("  "))
+				.isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> service.refreshAttempt(null))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
 	void windowExpiryRestoresCapacity() {
 		Clock start = Clock.fixed(START, ZoneOffset.UTC);
 		RateLimitService service = service(start);

@@ -167,6 +167,95 @@ class RateLimitFilterTest {
 	}
 
 	@Test
+	void refreshRouteUsesOwnIpBucket() throws Exception {
+		Harness harness = new Harness(
+				propertiesWithRefresh(10, 10, 10, 10, 2), true);
+
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(2);
+
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(2);
+		assertThat(harness.lastResponse().getStatus()).isEqualTo(429);
+		assertThat(harness.lastResponse().getHeader("Retry-After")).isNotBlank();
+		assertThat(harness.lastResponse().getContentType())
+				.contains("application/problem+json");
+		assertThat(harness.lastResponse().getContentAsString())
+				.contains("Too Many Requests");
+
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.8"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(3);
+	}
+
+	@Test
+	void refreshBudgetIsSeparateFromAuthAndAnonymousBuckets() throws Exception {
+		Harness harness = new Harness(
+				propertiesWithRefresh(1, 10, 10, 1, 1), true);
+
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(1);
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(1);
+		assertThat(harness.lastResponse().getStatus()).isEqualTo(429);
+
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/login", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(2);
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/register", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(3);
+
+		harness.filter().doFilter(
+				request("GET", "/api/v1/me/notifications", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(4);
+		harness.filter().doFilter(
+				request("GET", "/api/v1/me/notifications", null, "203.0.113.7"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(4);
+		assertThat(harness.lastResponse().getStatus()).isEqualTo(429);
+	}
+
+	@Test
+	void forwardedForHeaderIsNeverTrustedForRefresh() throws Exception {
+		Harness harness = new Harness(
+				propertiesWithRefresh(10, 10, 10, 10, 1), true);
+
+		MockHttpServletRequest spoofed =
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.7");
+		spoofed.addHeader("X-Forwarded-For", "203.0.113.8");
+		harness.filter().doFilter(spoofed, harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(1);
+
+		MockHttpServletRequest spoofedAgain =
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.7");
+		spoofedAgain.addHeader("X-Forwarded-For", "203.0.113.9");
+		harness.filter().doFilter(spoofedAgain, harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(1);
+		assertThat(harness.lastResponse().getStatus()).isEqualTo(429);
+
+		harness.filter().doFilter(
+				request("POST", "/api/v1/auth/refresh", null, "203.0.113.8"),
+				harness.response(), harness.chain());
+		assertThat(harness.calls()).isEqualTo(2);
+	}
+
+	@Test
 	void genuinePreflightBypassesWithoutConsumingBudget() throws Exception {
 		Harness harness = new Harness(properties(10, 1, 10, 1), true);
 		UUID userId = UUID.randomUUID();
@@ -210,13 +299,18 @@ class RateLimitFilterTest {
 
 	private static RateLimitProperties properties(int auth, int api,
 			int explanation, int anonymous) {
+		return propertiesWithRefresh(auth, api, explanation, anonymous, 10);
+	}
+
+	private static RateLimitProperties propertiesWithRefresh(int auth, int api,
+			int explanation, int anonymous, int refresh) {
 		return new RateLimitProperties(true,
 				Duration.ofMinutes(1), auth,
 				Duration.ofMinutes(1), api,
 				Duration.ofMinutes(1), explanation,
 				Duration.ofMinutes(1), anonymous,
 				1000, Duration.ofMinutes(10),
-				Duration.ofMinutes(1), 10);
+				Duration.ofMinutes(1), refresh);
 	}
 
 	private static MockHttpServletRequest request(String method, String uri,

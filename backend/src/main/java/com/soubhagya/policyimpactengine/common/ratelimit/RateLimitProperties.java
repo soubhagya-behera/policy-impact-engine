@@ -15,10 +15,11 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * through. Non-positive values fail fast here at binding time so a
  * misconfigured deployment never boots half-limited.
  *
- * <p>Phase 14-A/1 reserves the refresh tier (see DECISIONS.md
- * ADR-029): same shape and validation as the auth tier, consumed by
- * filter routing in a later slice — no service or filter behavior
- * attaches to it here.
+ * <p>Phase 14-A/3c activates the refresh tier (see DECISIONS.md
+ * ADR-029 §7): same shape and validation as the auth tier, consumed by
+ * the {@code POST /api/v1/auth/refresh} filter route through
+ * {@link RateLimitService#refreshAttempt} — own IP-keyed bucket at
+ * 10/minute/IP by default, separate from register/login.
  */
 @ConfigurationProperties(prefix = "rate-limit")
 public record RateLimitProperties(

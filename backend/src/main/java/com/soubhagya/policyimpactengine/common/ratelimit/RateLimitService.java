@@ -56,6 +56,17 @@ public class RateLimitService {
 				properties.authWindow(), properties.authMaxRequests());
 	}
 
+	/**
+	 * Phase 14-A/3c — refresh attempt from one client IP (see DECISIONS.md
+	 * ADR-029 §7). Own {@code auth-refresh} bucket at the configured
+	 * refresh window/maximum (10/minute/IP by default), separate from
+	 * the register/login buckets.
+	 */
+	public Decision refreshAttempt(String clientIp) {
+		return decide("auth-refresh", requireText(clientIp, "clientIp"),
+				properties.refreshWindow(), properties.refreshMaxRequests());
+	}
+
 	/** General authenticated API request for one user. */
 	public Decision apiRequest(UUID userId) {
 		if (userId == null) {

@@ -97,6 +97,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
 				&& "/api/v1/auth/login".equals(path)) {
 			return rateLimitService.loginAttempt(clientIp);
 		}
+		if ("POST".equalsIgnoreCase(method)
+				&& "/api/v1/auth/refresh".equals(path)) {
+			return rateLimitService.refreshAttempt(clientIp);
+		}
 		UUID userId = trustedUserId();
 		if ("POST".equalsIgnoreCase(method)
 				&& path.startsWith("/api/v1/me/impact-assessments/")
