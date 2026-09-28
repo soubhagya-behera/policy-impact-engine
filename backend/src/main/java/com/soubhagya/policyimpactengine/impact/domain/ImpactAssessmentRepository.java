@@ -61,4 +61,34 @@ public interface ImpactAssessmentRepository extends JpaRepository<ImpactAssessme
 			+ "JOIN FETCH a.previousVersion pv "
 			+ "WHERE a.user.id = :userId")
 	List<ImpactAssessment> findPagedWithVersions(@Param("userId") UUID userId, Pageable pageable);
+
+	/**
+	 * Phase 14-B/4 — total persisted assessments for one user.
+	 */
+	long countByUser_Id(UUID userId);
+
+	/**
+	 * Phase 14-B/4 — per-band assessment counts for one user from a
+	 * single GROUP BY query. Each row is
+	 * {@code Object[]{ImpactBand, Long}}; callers map the band to its
+	 * enum name. No assessment entities are loaded.
+	 */
+	@Query("SELECT a.aggregateBand, COUNT(a) FROM ImpactAssessment a "
+			+ "WHERE a.user.id = :userId GROUP BY a.aggregateBand")
+	List<Object[]> countByBandForUser(@Param("userId") UUID userId);
+
+	/**
+	 * Phase 14-B/4 — maximum persisted aggregate score for one user;
+	 * 0 when the user has no assessments.
+	 */
+	@Query("SELECT COALESCE(MAX(a.aggregateScore), 0) FROM ImpactAssessment a "
+			+ "WHERE a.user.id = :userId")
+	int maxAggregateScoreForUser(@Param("userId") UUID userId);
+
+	/**
+	 * Phase 14-B/4 — newest assessment for one user in the existing
+	 * newest-first order (createdAt DESC, id DESC) as a constant
+	 * single-row query for the impact summary.
+	 */
+	Optional<ImpactAssessment> findFirstByUser_IdOrderByCreatedAtDescIdDesc(UUID userId);
 }

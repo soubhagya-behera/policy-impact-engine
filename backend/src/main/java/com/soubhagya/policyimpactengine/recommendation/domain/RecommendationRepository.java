@@ -47,4 +47,12 @@ public interface RecommendationRepository extends JpaRepository<Recommendation, 
 	 * to 404 and never reveal whether the row exists).
 	 */
 	Optional<Recommendation> findByIdAndAssessment_User_Id(UUID id, UUID userId);
+
+	/**
+	 * Phase 14-B/4 — persisted recommendation count for one user's
+	 * assessments excluding one action kind (NONE_REQUIRED for the
+	 * actionable count). Ownership derives through the assessment;
+	 * no recommendation entities are loaded.
+	 */
+	long countByAssessment_User_IdAndActionKindNot(UUID userId, RecommendationActionKind actionKind);
 }
