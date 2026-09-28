@@ -1,6 +1,7 @@
 package com.soubhagya.policyimpactengine.diff.domain;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.domain.Pageable;
@@ -49,5 +50,13 @@ public interface PolicyChangeRecordRepository extends JpaRepository<PolicyChange
 	 */
 	List<PolicyChangeRecord> findByNewVersion_IdAndNewVersion_Policy_Owner_IdOrderByChangeOrderAsc(
 			UUID newVersionId, UUID ownerId);
+
+	/**
+	 * Phase 14-B/3 — single-change lookup scoped to the owning user for
+	 * the change-assessment endpoint. Ownership chains through
+	 * {@code change.newVersion.policy.owner}; a foreign or unknown
+	 * change behaves as not-found.
+	 */
+	Optional<PolicyChangeRecord> findByIdAndNewVersion_Policy_Owner_Id(UUID id, UUID ownerId);
 
 }
