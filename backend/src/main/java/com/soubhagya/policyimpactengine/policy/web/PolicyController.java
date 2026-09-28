@@ -19,7 +19,10 @@ import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
 import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyChangeReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService;
+import com.soubhagya.policyimpactengine.policy.web.dto.ChangeRecordResponse;
+import com.soubhagya.policyimpactengine.policy.web.dto.VersionDiffResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.CreatePolicyRequest;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.VersionDetailResponse;
@@ -48,15 +51,17 @@ public class PolicyController {
 
 	private final PolicyService service;
 	private final PolicyVersionReadService versions;
+	private final PolicyChangeReadService changes;
 	private final AuditService auditService;
 
 	public PolicyController(PolicyService service, PolicyVersionReadService versions,
-			AuditService auditService) {
-		if (service == null || versions == null || auditService == null) {
+			PolicyChangeReadService changes, AuditService auditService) {
+		if (service == null || versions == null || changes == null || auditService == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.service = service;
 		this.versions = versions;
+		this.changes = changes;
 		this.auditService = auditService;
 	}
 
@@ -121,6 +126,40 @@ public class PolicyController {
 			@PathVariable UUID policyId, @PathVariable UUID versionId) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
 		return versions.get(userId, policyId, versionId);
+	}
+
+	/**
+	 * Phase 14-B/2 — paginated owner-scoped change history (ADR-026):
+	 * bare JSON array of persisted change rows in transition order
+	 * (successor version number ascending, then document position
+	 * ascending), windowed by {@code page}/{@code size} (defaults 0/20,
+	 * maximum 100). Identity still comes only from the principal; the
+	 * principal is resolved before pagination is validated so
+	 * unauthenticated callers stay 401. A foreign or unknown policy, or
+	 * a policy with no change rows, yields an empty page.
+	 */
+	@GetMapping("/{policyId}/changes")
+	public List<ChangeRecordResponse> listChanges(Authentication authentication,
+			@PathVariable UUID policyId,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return changes.list(userId, policyId, pagination.page(), pagination.size());
+	}
+
+	/**
+	 * Phase 14-B/2 — persisted changes for one adjacent version
+	 * transition ({@code to == from + 1}). {@code from} and {@code to}
+	 * are 1-based version numbers, not version ids. A foreign, unknown,
+	 * or mismatched version behaves as not-found; a non-adjacent range
+	 * or a version number below 1 is rejected.
+	 */
+	@GetMapping("/{policyId}/versions/{from}/diff/{to}")
+	public VersionDiffResponse diffVersions(Authentication authentication,
+			@PathVariable UUID policyId, @PathVariable int from, @PathVariable int to) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		return changes.diff(userId, policyId, from, to);
 	}
 
 }

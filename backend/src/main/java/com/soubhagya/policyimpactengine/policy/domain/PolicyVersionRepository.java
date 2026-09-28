@@ -59,4 +59,12 @@ public interface PolicyVersionRepository extends JpaRepository<PolicyVersion, UU
 	 */
 	Optional<PolicyVersion> findByIdAndPolicy_Owner_Id(UUID id, UUID ownerId);
 
+	/**
+	 * Phase 14-B/2 — single-version lookup by sequence number scoped to
+	 * the owning user for the adjacent-version diff endpoint. A foreign
+	 * or unknown version behaves as not-found.
+	 */
+	Optional<PolicyVersion> findByPolicy_IdAndVersionNumberAndPolicy_Owner_Id(
+			UUID policyId, int versionNumber, UUID ownerId);
+
 }
