@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -19,6 +20,7 @@ import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
 import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyArchiveService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyChangeReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService;
 import com.soubhagya.policyimpactengine.policy.web.dto.ChangeRecordResponse;
@@ -41,6 +43,9 @@ import jakarta.validation.Valid;
  * parameters, headers, or path variables. Cross-user access behaves
  * as not-found.
  *
+ * <p>Deletion archives the owned policy through the same
+ * principal-only identity; repeats stay {@code 204 No Content}.
+ *
  * <p>Phase 11C emits {@code POLICY_REGISTERED} after the policy
  * row commits. Reads, observations, and failed registrations never
  * reach the emit line. No policy URL or content enters metadata.
@@ -50,16 +55,20 @@ import jakarta.validation.Valid;
 public class PolicyController {
 
 	private final PolicyService service;
+	private final PolicyArchiveService archive;
 	private final PolicyVersionReadService versions;
 	private final PolicyChangeReadService changes;
 	private final AuditService auditService;
 
-	public PolicyController(PolicyService service, PolicyVersionReadService versions,
+	public PolicyController(PolicyService service, PolicyArchiveService archive,
+			PolicyVersionReadService versions,
 			PolicyChangeReadService changes, AuditService auditService) {
-		if (service == null || versions == null || changes == null || auditService == null) {
+		if (service == null || archive == null || versions == null || changes == null
+				|| auditService == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.service = service;
+		this.archive = archive;
 		this.versions = versions;
 		this.changes = changes;
 		this.auditService = auditService;
@@ -96,6 +105,23 @@ public class PolicyController {
 	public PolicyResponse getById(Authentication authentication, @PathVariable UUID id) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
 		return service.get(userId, id);
+	}
+
+	/**
+	 * Phase 14-C/3 — owner-scoped archive delete (ADR-030). Thin:
+	 * resolves the user id exclusively from the authenticated
+	 * principal and delegates to {@link PolicyArchiveService}. A real
+	 * {@code ACTIVE → ARCHIVED} transition and an already-archived
+	 * repeat both yield {@code 204 No Content} with an empty body; a
+	 * foreign or unknown policy behaves as not-found. No request
+	 * body, no client-supplied identity.
+	 */
+	@DeleteMapping("/{policyId}")
+	public ResponseEntity<Void> delete(Authentication authentication,
+			@PathVariable UUID policyId) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		archive.archive(userId, policyId);
+		return ResponseEntity.noContent().build();
 	}
 
 	/**
