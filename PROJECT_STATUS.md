@@ -1348,8 +1348,57 @@ Testcontainers)
 - Deferred exactly as ADR-029 says: logout (revoke-current/all),
 refresh-token reuse audit event (CHECK-constraint migration
 follow-up), successor-grace for racing clients, and sliding TTL
-(the absolute lifetime stands); no Phase 14-B implementation
+(the absolute lifetime stands)
 
 Phase 14-A (refresh-token lifecycle, slices 14-A/1 through
 14-A/3c) is now complete, as scoped in ADR-029.
+
+Phase 14-B slice implemented and tested successfully
+(authenticated policy-history and impact-summary reads; no new ADR —
+ADR-026/ADR-027/ADR-029 already cover the architecture):
+- 14-B/1 policy version history: `GET
+/api/v1/policies/{policyId}/versions` (paginated bare array,
+version-number ascending; foreign/unknown policy yields an empty
+page) and `GET /api/v1/policies/{policyId}/versions/{versionId}`
+(single owner-scoped snapshot; foreign/unknown/policy-mismatched
+version → 404) via a new read-only `PolicyVersionReadService`
+(explicit principal userId, no SecurityContext, DTO mapping inside
+the read transaction, no writes)
+- 14-B/2 policy changes + adjacent diff: `GET
+/api/v1/policies/{policyId}/changes` (paginated bare array in
+transition order; foreign/unknown policy yields an empty page) and
+`GET /api/v1/policies/{policyId}/versions/{from}/diff/{to}`
+(adjacent versions only — non-adjacent → 400;
+unknown/foreign/mismatched → 404; persisted rows only, never
+recomputed) via a new read-only `PolicyChangeReadService`
+- 14-B/3 change → assessment: `GET
+/api/v1/changes/{changeId}/assessment` returning `{change:
+ChangeRecordResponse, assessment: ImpactAssessmentDetailResponse}`
+with breakdowns filtered to the requested change, via a new
+read-only `ChangeAssessmentReadService` (owner-scoped change
+lookup through `change.newVersion.policy.owner`, existing
+assessment read via `findByUser_IdAndNewVersion_Id` — never
+created — existing detail semantics preserved)
+- 14-B/4 impact summary: `GET /api/v1/me/impact-summary`
+returning the single persisted-facts object (`totalAssessments`,
+`assessmentsByBand`, `maxAggregateScore`,
+`actionableRecommendations` excluding NONE_REQUIRED, `latest`
+newest summary or null; empty state `0/[]/0/0/null`; no
+pagination) via a new read-only `ImpactSummaryReadService`
+(user-scoped COUNT/GROUP BY/MAX aggregates plus the existing
+newest-first single-row lookup; entities never bulk-loaded)
+- Principal-only identity on every endpoint
+(`AuthenticatedUsers.requireUserId`, resolved before pagination
+validation); anonymous → 401 `Unauthenticated`; malformed UUIDs →
+400 `Malformed request`; foreign/unknown rows → 404 `Resource not
+found`, never 403; no client-supplied userId/ownerId identity
+- No migration after V19, no new dependency, no
+security/rate-limit redesign, no scoring/recommendation/
+notification/audit/diff-engine behavior change, no 14-A
+regression
+- `./mvnw.cmd clean test`: 1143 tests passing, 0 failures, 0 errors,
+BUILD SUCCESS (Flyway validates/applies all 19 migrations in
+Testcontainers)
+
+Phase 14-B (slices 14-B/1 through 14-B/4) is now complete.
 Wait for explicit instruction before beginning new work.

@@ -412,13 +412,13 @@ All REST APIs are versioned under **`/api/v1`**. The following surface mixes IMP
 | GET | `/api/v1/policies/{id}` | Policy detail (owned only, foreign → 404) | 1, owner-scoped (IMPLEMENTED) |
 | DELETE | `/api/v1/policies/{id}` | Remove a policy | 1 |
 | POST | `/api/v1/policies/{id}/check` | Trigger a manual fetch/check | 2–3 |
-| GET | `/api/v1/policies/{id}/versions` | Version history | 3 |
-| GET | `/api/v1/policies/{id}/versions/{versionId}` | Version snapshot content | 3 |
-| GET | `/api/v1/policies/{id}/changes` | Changes for a policy | 4 |
-| GET | `/api/v1/policies/{id}/versions/{a}/diff/{b}` | Diff between two versions | 4 |
+| GET | `/api/v1/policies/{policyId}/versions` | Owner-scoped version history, version-number ascending | 14-B/1 (IMPLEMENTED); paginated per the feed convention below (13-B); foreign/unknown policy yields an empty page |
+| GET | `/api/v1/policies/{policyId}/versions/{versionId}` | Owner-scoped version snapshot (foreign, unknown, or policy-mismatched version → 404) | 14-B/1 (IMPLEMENTED) |
+| GET | `/api/v1/policies/{policyId}/changes` | Owner-scoped persisted change history in transition order | 14-B/2 (IMPLEMENTED); paginated per the feed convention below (13-B); foreign/unknown policy yields an empty page |
+| GET | `/api/v1/policies/{policyId}/versions/{from}/diff/{to}` | Persisted adjacent-version diff (non-adjacent → 400; unknown/foreign/mismatched → 404; never recomputed) | 14-B/2 (IMPLEMENTED) |
 | GET / PUT | `/api/v1/me/privacy-preferences` | Read / bulk-update the privacy profile (full concept surface, merge semantics) | 6 (IMPLEMENTED) |
-| GET | `/api/v1/changes/{changeId}/assessment` | Scored assessment with breakdown | 6 |
-| GET | `/api/v1/me/impact-summary` | Pending-impact digest for the user | 6 |
+| GET | `/api/v1/changes/{changeId}/assessment` | Owner-scoped change context plus the existing assessment detail with breakdowns filtered to the requested change (unknown/foreign change or owned change with no assessment → 404; never created or recomputed) | 14-B/3 (IMPLEMENTED) |
+| GET | `/api/v1/me/impact-summary` | Persisted-facts impact summary (`totalAssessments`, `assessmentsByBand`, `maxAggregateScore`, `actionableRecommendations` excluding NONE_REQUIRED, `latest` newest assessment or null; single object, no pagination; read-only aggregates) | 14-B/4 (IMPLEMENTED) |
 | GET | `/api/v1/me/impact-assessments` | Personal assessment summaries, newest first (no breakdowns) | Assessment/Recommendation REST (IMPLEMENTED); paginated per the feed convention below (13-B) |
 | GET | `/api/v1/me/impact-assessments/{id}` | Assessment detail with ordered breakdown | Assessment/Recommendation REST (IMPLEMENTED) |
 | POST | `/api/v1/me/impact-assessments/{id}/explanation` | Optional advisory prose for one persisted assessment (deterministic fallback when AI disabled/unavailable; authoritative facts echoed from DB) | 12 (IMPLEMENTED, per ADR-024) |
@@ -432,7 +432,7 @@ All REST APIs are versioned under **`/api/v1`**. The following surface mixes IMP
 | POST | `/api/v1/me/notifications/{id}/read` | Mark a notification read | 10B-2B (IMPLEMENTED) |
 | GET | `/api/v1/me/audit-events` | The user's audit trail | 11 (IMPLEMENTED, Phase 11D: self-scoped, newest-first, read-only); paginated per the feed convention below (13-B) |
 
-Feed pagination convention (IMPLEMENTED, Phase 13-B, see DECISIONS.md ADR-026): the six listing endpoints above accept `?page=` (default 0) and `?size=` (default 20, maximum 100) and return a bare JSON array with no envelope and no total count. Out-of-range values (`page < 0`, `size < 1`, `size > 100`) and malformed numerics are 400 `application/problem+json`; empty pages are `200 []`. Existing per-feed ordering is preserved, with the single approved refinement that both notification feeds order by `createdAt DESC, id DESC` (the id tie-break keeps pages deterministic across equal timestamps). OFFSET deep-page cost is an accepted limitation; keyset/cursor pagination is deferred.
+Feed pagination convention (IMPLEMENTED, Phase 13-B, see DECISIONS.md ADR-026): the eight listing endpoints above accept `?page=` (default 0) and `?size=` (default 20, maximum 100) and return a bare JSON array with no envelope and no total count. Out-of-range values (`page < 0`, `size < 1`, `size > 100`) and malformed numerics are 400 `application/problem+json`; empty pages are `200 []`. Existing per-feed ordering is preserved, with the single approved refinement that both notification feeds order by `createdAt DESC, id DESC` (the id tie-break keeps pages deterministic across equal timestamps). OFFSET deep-page cost is an accepted limitation; keyset/cursor pagination is deferred.
 
 Feed N+1 mitigation (IMPLEMENTED, Phase 13-F): the paged assessment path reads through a fetch-join query over `newVersion` + `previousVersion`, and the paged notification/unread paths read through a fetch-join query over `assessment` + its `newVersion`, so each page costs a constant number of SELECTs (assessments/notifications/unread 1 per page, recommendations/audit 1, policies a constant 2). No `FetchType` change and no broad EAGER/fetch strategy: the joins apply to the paged repository queries only, and rows, ordering, ownership, response shape, and transaction boundaries are unchanged.
 

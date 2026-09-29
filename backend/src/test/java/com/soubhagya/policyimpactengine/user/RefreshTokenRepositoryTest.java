@@ -79,10 +79,10 @@ class RefreshTokenRepositoryTest {
 	}
 
 	@Test
-	void v1ToV19ValidationRemainsClean() {
+	void v1ToV20ValidationRemainsClean() {
 		Integer applied = jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM flyway_schema_history WHERE success=true", Integer.class);
-		assertThat(applied).isEqualTo(19);
+		assertThat(applied).isEqualTo(20);
 		Integer failed = jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM flyway_schema_history WHERE success=false", Integer.class);
 		assertThat(failed).isZero();

@@ -722,3 +722,27 @@ Rules remain code-defined and versioned (`RECOMMENDATION_RULES_VERSION = 1`) and
 - Clients gain a bounded 30-day session with theft containment (reuse kills the family; worst case is re-login), while the access-token TTL and all 401 shapes stay byte-identical.
 - The granted-but-unimplemented surface is explicit: logout, reuse audit codes, and successor-grace for racing clients each need their own decision; this ADR is a ceiling, not a floor.
 
+---
+
+## ADR-030 — Policy Deletion as Archive + POLICY_ARCHIVED Audit Code (Phase 14-C)
+
+**Status:** Accepted (decision and audit-catalog foundation only; the DELETE endpoint, archive transition, and emission wiring belong to later 14-C slices and are not implemented by this record)
+
+**Context:** Phase 14-B left the policy lifecycle write-less: there is no `DELETE /api/v1/policies/{policyId}` (ARCHITECTURE.md §28 still lists it as unimplemented Phase-1 future), and `PolicyStatus.ARCHIVED` ("Retained but no longer monitored") exists but is referenced nowhere in production code. Deletion must respect thirteen foreign keys — every one bare `REFERENCES` with no `ON DELETE` action — plus the append-only doctrines on versions, changes, matches, impacts, assessments, recommendations, notifications, and fetch attempts (V2/V3/V4/V5/V7/V8/V9 headers: never updated or deleted), and the ADR-022/023 audit model whose frozen six-code catalog (V17 CHECK + `AuditEventType`) admits new codes only with an explicit decision. This record fixes the delete semantics and widens the catalog; it creates no endpoint and changes no runtime behavior.
+
+**Decision:**
+
+1. DELETE means owner-scoped `ACTIVE → ARCHIVED` transition, never physical deletion. History (versions, changes, matches, impacts, assessments, breakdowns, recommendations, notifications, fetch attempts, audit rows) remains fully retained and readable; archived policies remain readable through the existing owner-scoped reads. No hard deletion or erasure exists in 14-C.
+2. Scheduler and fan-out need no redesign: due selection already loads `ACTIVE` policies only, so ARCHIVED policies stop being observed with zero scheduler changes; fan-out already returns silently for non-`ACTIVE` policies. In-flight observations complete normally because no row ever disappears (no FK race by construction).
+3. Repeated DELETE will be idempotent `204 No Content` with no second audit event (ensure-archived semantics; mirrors the `assignOwner` no-op silence). Unknown/foreign policies will stay `404 Resource not found`, never 403, per the owner-isolation convention.
+4. New audit code `POLICY_ARCHIVED` (actor = owning deleter, resource = `POLICY`/policy id, empty metadata, no URL/content). Emission — when later wired — stays post-commit best-effort per ADR-022 §2 and fires only on the actual transition, never on idempotent repeats or reads. This record adds the code, not the wiring.
+5. V20 widens the frozen audit CHECK from six codes to exactly seven (the existing six plus `POLICY_ARCHIVED`): drop the verified V17 constraint `audit_event_event_type_check` by its real PostgreSQL name and recreate it with the extended set. No table, column, index, or data change; V1–V19 untouched. The enum and the CHECK stay in lockstep per the frozen-catalog rule.
+6. Explicitly out of 14-C: admin delete, ownership transfer, bulk deletion, un-delete/reactivation, audit retention purge, erasure/GDPR purge design, logout, roles, multi-tenancy, new infrastructure.
+
+**Consequences:**
+
+- The audit chain stays tamper-evident and complete across deletions: every lifecycle write keeps a live resource row for its witness event to point at.
+- Deletion cannot break monitoring, fan-out, stale recovery, or verification by FK violation, because it removes nothing.
+- The honest limitation is stated openly: archive-on-delete is retention, not erasure — names, URLs, and contents persist. True erasure would fight six append-only doctrines and the audit chain and needs its own future decision.
+- Later 14-C slices implement the transition service, the endpoint, and the emission wiring strictly inside this ceiling; anything beyond it (library hiding, reactivation, erasure) needs a new decision.
+
