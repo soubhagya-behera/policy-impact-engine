@@ -6,7 +6,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Pageable;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Persistence for {@link Policy}.
@@ -49,5 +53,27 @@ public interface PolicyRepository extends JpaRepository<Policy, UUID> {
 	 * only, no count query).
 	 */
 	List<Policy> findByOwner_Id(UUID ownerId, Pageable pageable);
+
+	/**
+	 * Phase 14-C/2 — atomic archive election: transitions exactly one
+	 * owned {@code ACTIVE} policy to {@code ARCHIVED}. The {@code id} +
+	 * {@code owner_id} + {@code status} conjuncts make ownership and
+	 * transition atomic: a foreign, unknown, or already-archived row
+	 * matches nothing. The persistence context is cleared so callers
+	 * re-read the freshly archived row instead of a stale pre-archive
+	 * instance.
+	 *
+	 * @return 1 when this caller won the transition (it must then emit
+	 *         the single {@code POLICY_ARCHIVED} audit event), 0 when
+	 *         the row was foreign, unknown, or already archived (the
+	 *         caller must emit nothing)
+	 */
+	@Transactional
+	@Modifying(clearAutomatically = true)
+	@Query("UPDATE Policy policy SET policy.status = :archived"
+			+ " WHERE policy.id = :id AND policy.owner.id = :ownerId"
+			+ " AND policy.status = :active")
+	int archiveOwnedActive(@Param("id") UUID id, @Param("ownerId") UUID ownerId,
+			@Param("active") PolicyStatus active, @Param("archived") PolicyStatus archived);
 
 }
