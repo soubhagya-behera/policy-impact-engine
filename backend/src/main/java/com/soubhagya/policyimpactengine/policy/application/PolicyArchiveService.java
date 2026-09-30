@@ -16,9 +16,10 @@ import com.soubhagya.policyimpactengine.policy.domain.PolicyStatus;
 
 /**
  * Phase 14-C/2 — owner-scoped policy archive transition (see
- * DECISIONS.md ADR-030). No HTTP surface here; the DELETE endpoint
- * belongs to a later slice and must resolve identity exclusively
- * from the authenticated principal before delegating.
+ * DECISIONS.md ADR-030). The HTTP surface is implemented in
+ * Phase 14-C/3 (DELETE /api/v1/policies/{policyId}), which
+ * resolves identity exclusively from the authenticated
+ * principal before delegating here.
  *
  * <p>Semantics: exactly one caller transitions an owned {@code
  * ACTIVE} policy to {@code ARCHIVED} through a single conditional

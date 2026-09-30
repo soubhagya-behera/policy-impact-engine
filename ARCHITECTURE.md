@@ -410,7 +410,7 @@ All REST APIs are versioned under **`/api/v1`**. The following surface mixes IMP
 | POST | `/api/v1/policies` | Register a policy (owner = authenticated user) | 1, owner-scoped (IMPLEMENTED) |
 | GET | `/api/v1/policies` | List the user's policies (owned only) | 1, owner-scoped (IMPLEMENTED); paginated per the feed convention below (13-B) |
 | GET | `/api/v1/policies/{id}` | Policy detail (owned only, foreign → 404) | 1, owner-scoped (IMPLEMENTED) |
-| DELETE | `/api/v1/policies/{id}` | Remove a policy | 1 |
+| DELETE | `/api/v1/policies/{policyId}` | Owner-scoped archive delete: ACTIVE → ARCHIVED, idempotent 204, foreign/unknown → 404, POLICY_ARCHIVED post-commit audit on transition only | 14-C (IMPLEMENTED) |
 | POST | `/api/v1/policies/{id}/check` | Trigger a manual fetch/check | 2–3 |
 | GET | `/api/v1/policies/{policyId}/versions` | Owner-scoped version history, version-number ascending | 14-B/1 (IMPLEMENTED); paginated per the feed convention below (13-B); foreign/unknown policy yields an empty page |
 | GET | `/api/v1/policies/{policyId}/versions/{versionId}` | Owner-scoped version snapshot (foreign, unknown, or policy-mismatched version → 404) | 14-B/1 (IMPLEMENTED) |
@@ -435,6 +435,8 @@ All REST APIs are versioned under **`/api/v1`**. The following surface mixes IMP
 Feed pagination convention (IMPLEMENTED, Phase 13-B, see DECISIONS.md ADR-026): the eight listing endpoints above accept `?page=` (default 0) and `?size=` (default 20, maximum 100) and return a bare JSON array with no envelope and no total count. Out-of-range values (`page < 0`, `size < 1`, `size > 100`) and malformed numerics are 400 `application/problem+json`; empty pages are `200 []`. Existing per-feed ordering is preserved, with the single approved refinement that both notification feeds order by `createdAt DESC, id DESC` (the id tie-break keeps pages deterministic across equal timestamps). OFFSET deep-page cost is an accepted limitation; keyset/cursor pagination is deferred.
 
 Feed N+1 mitigation (IMPLEMENTED, Phase 13-F): the paged assessment path reads through a fetch-join query over `newVersion` + `previousVersion`, and the paged notification/unread paths read through a fetch-join query over `assessment` + its `newVersion`, so each page costs a constant number of SELECTs (assessments/notifications/unread 1 per page, recommendations/audit 1, policies a constant 2). No `FetchType` change and no broad EAGER/fetch strategy: the joins apply to the paged repository queries only, and rows, ordering, ownership, response shape, and transaction boundaries are unchanged.
+
+Policy lifecycle / archive (IMPLEMENTED, Phase 14-C, see DECISIONS.md ADR-030): `DELETE /api/v1/policies/{policyId}` transitions an owned `ACTIVE` policy to `ARCHIVED`. An archived policy is retained but no longer monitored — historical data (versions, changes, matches, impacts, assessments, recommendations, notifications, fetch attempts, audit rows) remains readable through the existing owner-scoped reads. Archive is NOT data erasure. The scheduler skips `ARCHIVED` policies (due selection loads `ACTIVE` only) with no scheduler redesign. Hard delete/erasure remains deferred.
 
 API conventions:
 

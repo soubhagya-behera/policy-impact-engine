@@ -1401,4 +1401,43 @@ BUILD SUCCESS (Flyway validates/applies all 19 migrations in
 Testcontainers)
 
 Phase 14-B (slices 14-B/1 through 14-B/4) is now complete.
+
+Phase 14-C slice implemented and tested successfully
+(policy lifecycle archive + delete; see DECISIONS.md ADR-030 —
+ADR-030 unchanged):
+- 14-C/1 V20 + POLICY_ARCHIVED: Flyway V20 widens the frozen
+audit CHECK from six codes to exactly seven (existing six plus
+POLICY_ARCHIVED); no table, column, index, or data change;
+V1–V19 untouched; enum and CHECK stay in lockstep
+- 14-C/2 archive transition service: owner-scoped ACTIVE →
+ARCHIVED through a single conditional database update
+(id + owner_id + status); concurrent attempts converge in the
+database with no Java synchronization; already-archived is a
+successful no-op emitting nothing; unknown/foreign → not-found,
+never forbidden; POLICY_ARCHIVED emitted post-commit only on
+the actual transition as a best-effort witness that never rolls
+back the committed ARCHIVED state; no row deletion, no
+scheduler/fan-out/observation/ownership change, no reactivation
+- 14-C/3 DELETE endpoint: DELETE /api/v1/policies/{policyId}
+resolves identity exclusively from the authenticated principal
+and delegates to the archive service; real transition and
+already-archived repeat both yield 204 No Content with an empty
+body; foreign/unknown → 404, never 403; no request body, no
+client-supplied identity
+- 14-C/4 lifecycle regression: end-to-end ACTIVE → ARCHIVED proof
+(HTTP 204, status ARCHIVED, exactly one POLICY_ARCHIVED row,
+retained history readable, scheduler exclusion)
+- `./mvnw.cmd clean test`: 1181 tests passing, 0 failures,
+0 errors, BUILD SUCCESS
+- Retained history / non-erasure semantics: archived policies are
+retained but no longer monitored; versions, changes, matches,
+impacts, assessments, recommendations, notifications, fetch
+attempts, and audit rows remain readable; archive is NOT data
+erasure
+- Deferred: hard delete/erasure, retention purge, reactivation,
+admin/bulk delete
+- No migration after V20, no new dependency, no
+security/rate-limit/JWT redesign, no scheduler/observation/
+fan-out behavior change
+- Phase 14-C is now complete.
 Wait for explicit instruction before beginning new work.
