@@ -1505,4 +1505,43 @@ new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
 all 21 migrations in Testcontainers; audit verification VALID after
 both logout event types)
 - Phase 15-A/2 is now complete.
+
+Phase 15-B/1 slice completed as a planning/decision slice
+(refresh-token reuse audit contract; see DECISIONS.md ADR-032 —
+ADR-029 unchanged, no new migration, no endpoints, no production
+behavior change):
+- Contract: exactly one new code, `AUTH_REFRESH_REUSE_DETECTED`,
+triggered only by an unexpired superseded (successor-linked)
+presentation on the refresh path — the existing family-revocation
+branch, expiry-first ordering preserved
+- Emission only when the kill revokes at least one live session;
+repeats, zero-live kills, expired/unknown/revoked-nonsuccessor
+presentations stay silent (no chain-spam from stale backups)
+- Actor = owning user from the superseded row, resource =
+USER/user id, empty metadata; raw token, digest, secret, email,
+JWT, and client material forbidden by construction
+- Post-commit best-effort append after the rotation transaction
+commits; audit failure never rolls back revocation and still
+yields the byte-identical uniform 401 (narrow, stated exception
+to the propagate rule, avoiding a 401-vs-500 oracle)
+- Concurrency via DB predicates only: simultaneous same-digest
+presentations converge to one event (first committer), every
+caller 401; logout/reuse races resolve per predicate, each code
+on its own transition
+- Migration: Flyway V22 reserved for the implementation slice
+(widen `audit_event_event_type_check` from nine codes to ten;
+no table/column/index/data change; V1–V21 untouched); no
+migration file in this slice
+- Implementation impact for the following slice: enum value + V22,
+`RefreshReuseDetectedException extends InvalidRefreshTokenException`
+(owner id + revoked-live count, existing 401 mapping covers the
+subclass), controller catch-and-audit with audit-failure-to-401
+translation; no SecurityConfig/rate-limit/endpoint-shape change;
+no new dependency, Redis, denylist, roles, OAuth2
+- `./mvnw.cmd clean test`: not re-run (docs/decision-only slice;
+no Java, resource, migration, or test change); suite state
+unchanged at 1213 passing, 0 failures, 0 errors
+- Phase 15-B/1 (decision only) is now complete. Enum, V22
+migration, service, and behavior belong to the following
+implementation slice and are NOT IMPLEMENTED.
 Wait for explicit instruction before beginning new work.
