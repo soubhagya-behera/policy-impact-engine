@@ -67,10 +67,10 @@ class AuditEventCatalogV21Test {
 	}
 
 	@Test
-	void v1ToV21ValidationRemainsClean() {
+	void v1ToV22ValidationRemainsClean() {
 		Integer applied = jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM flyway_schema_history WHERE success=true", Integer.class);
-		assertThat(applied).isEqualTo(21);
+		assertThat(applied).isEqualTo(22);
 		Integer failed = jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM flyway_schema_history WHERE success=false", Integer.class);
 		assertThat(failed).isZero();
@@ -101,17 +101,23 @@ class AuditEventCatalogV21Test {
 		}
 	}
 
+	/**
+	 * Phase 15-B/2 — V22 widened the catalog to ten codes (see DECISIONS.md
+	 * ADR-032), so exact equality lives in {@code AuditEventCatalogV22Test}.
+	 * This V21-era test now proves the subset it introduced: all nine V21
+	 * codes remain in both the enum and the CHECK.
+	 */
 	@Test
-	void enumAndCheckStayInLockstep() {
+	void v21CodesRemainInEnumAndCheck() {
 		List<String> enumCodes = java.util.Arrays.stream(AuditEventType.values())
 				.map(Enum::name).sorted().toList();
-		assertThat(enumCodes).containsExactlyInAnyOrderElementsOf(NINE_CODES);
+		assertThat(enumCodes).containsAll(NINE_CODES);
 
 		String definition = jdbcTemplate.queryForObject(
 				"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname=?",
 				String.class, "audit_event_event_type_check");
 		assertThat(definition).isNotNull();
-		for (String code : enumCodes) {
+		for (String code : NINE_CODES) {
 			assertThat(definition).contains("'" + code + "'");
 		}
 	}

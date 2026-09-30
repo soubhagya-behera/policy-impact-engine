@@ -43,7 +43,11 @@ import com.soubhagya.policyimpactengine.user.domain.UserRepository;
  * Presenting a superseded row (one carrying a successor link) revokes
  * every live row of the owning user — derived from that row — before
  * failing uniformly; expired rows never trigger family revocation
- * because the expiry check runs first.
+ * because the expiry check runs first. Phase 15-B/2: a superseded
+ * presentation that actually revokes at least one live row raises
+ * {@link RefreshReuseDetectedException} (same type hierarchy and
+ * message, plus owner id and revoked-live count for the post-commit
+ * audit); a zero-live kill keeps the normal invalid signal.
  *
  * <p>Concurrency across threads and instances uses database predicate
  * updates only, never Java synchronization: the consume update matches
@@ -125,13 +129,21 @@ public class AuthRefreshService {
 	/**
 	 * Rotates the presented raw token: atomically consumes its row and
 	 * inserts the successor, returning the new raw token exactly once.
-	 * Every failure mode yields the same exception and message.
+	 * Every failure mode yields the same exception type and message.
 	 *
-	 * <p>Failure is signalled by returning {@code null} from the
+	 * <p>Failure is signalled by returning an outcome from the
 	 * transaction rather than throwing out of it: the reuse path writes
 	 * the family revocation, which must commit instead of being rolled
 	 * back with the rotation failure. The uniform exception is raised
 	 * after the transaction completes.
+	 *
+	 * <p>Phase 15-B/2 — reuse witness (see DECISIONS.md ADR-032): a
+	 * superseded (successor-linked), unexpired presentation whose family
+	 * revocation actually revokes at least one live row raises
+	 * {@link RefreshReuseDetectedException} carrying only the owning
+	 * user id and the revoked-live count for the post-commit audit. A
+	 * zero-live kill and every other failure mode raise the normal
+	 * {@link InvalidRefreshTokenException} with no audit signal.
 	 */
 	public RefreshResult rotate(String presentedRawToken) {
 		if (presentedRawToken == null || presentedRawToken.isBlank()) {
@@ -140,21 +152,24 @@ public class AuthRefreshService {
 		String presentedHash = sha256Hex(presentedRawToken);
 		Instant now = clock.instant();
 		long lifetimeSeconds = jwtService.refreshTokenExpiresInSeconds();
-		RefreshResult rotated = writeTransaction.execute(status -> {
+		RotationOutcome outcome = writeTransaction.execute(status -> {
 			var found = refreshTokenRepository.findByTokenHash(presentedHash);
 			if (found.isEmpty()) {
-				return null;
+				return RotationOutcome.failed();
 			}
 			RefreshToken row = found.get();
 			if (!row.getExpiresAt().isAfter(now)) {
-				return null;
+				return RotationOutcome.failed();
 			}
 			if (row.getRevokedAt() != null) {
 				if (row.getReplacedByTokenHash() != null) {
-					refreshTokenRepository.revokeLiveTokensForUser(
+					int revoked = refreshTokenRepository.revokeLiveTokensForUser(
 							row.getUser().getId(), now, now);
+					if (revoked > 0) {
+						return RotationOutcome.reuse(row.getUser().getId(), revoked);
+					}
 				}
-				return null;
+				return RotationOutcome.failed();
 			}
 			String successorRaw = generateRawToken(secureRandom);
 			String successorHash = sha256Hex(successorRaw);
@@ -162,17 +177,21 @@ public class AuthRefreshService {
 			int consumed = refreshTokenRepository.consumeToken(
 					presentedHash, successorHash, now, now);
 			if (consumed != 1) {
-				return null;
+				return RotationOutcome.failed();
 			}
 			refreshTokenRepository.saveAndFlush(
 					new RefreshToken(row.getUser(), successorHash, now, expiresAt));
-			return new RefreshResult(row.getUser().getId(), successorRaw, expiresAt,
-					lifetimeSeconds);
+			return RotationOutcome.rotated(new RefreshResult(row.getUser().getId(),
+					successorRaw, expiresAt, lifetimeSeconds));
 		});
-		if (rotated == null) {
+		if (outcome.reuse() != null) {
+			throw new RefreshReuseDetectedException(outcome.reuse().userId(),
+					outcome.reuse().revokedLiveCount());
+		}
+		if (outcome.rotated() == null) {
 			throw invalid();
 		}
-		return rotated;
+		return outcome.rotated();
 	}
 
 	/**
@@ -232,5 +251,29 @@ public class AuthRefreshService {
 
 	private static InvalidRefreshTokenException invalid() {
 		return new InvalidRefreshTokenException(INVALID_REFRESH_TOKEN_MESSAGE);
+	}
+
+	/**
+	 * Rotation outcome returned from the transaction instead of thrown
+	 * out of it, so the reuse revocation commits before the uniform
+	 * exception is raised. Carries at most one of a rotated result or a
+	 * reuse attribution (owning user id plus revoked-live count).
+	 */
+	private record RotationOutcome(RefreshResult rotated, ReuseAttribution reuse) {
+
+		static RotationOutcome rotated(RefreshResult rotated) {
+			return new RotationOutcome(rotated, null);
+		}
+
+		static RotationOutcome reuse(UUID userId, int revokedLiveCount) {
+			return new RotationOutcome(null, new ReuseAttribution(userId, revokedLiveCount));
+		}
+
+		static RotationOutcome failed() {
+			return new RotationOutcome(null, null);
+		}
+	}
+
+	private record ReuseAttribution(UUID userId, int revokedLiveCount) {
 	}
 }

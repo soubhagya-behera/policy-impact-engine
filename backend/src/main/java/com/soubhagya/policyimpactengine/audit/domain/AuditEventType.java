@@ -4,13 +4,13 @@ package com.soubhagya.policyimpactengine.audit.domain;
  * Phase 11A — frozen first-wave audit event catalog (see DECISIONS.md
  * ADR-023 §12).
  *
- * <p>Exactly these nine codes may be persisted; the {@code event_type}
+ * <p>Exactly these ten codes may be persisted; the {@code event_type}
  * CHECK in V17 (widened by V20, see DECISIONS.md ADR-030, then by V21,
- * see DECISIONS.md ADR-031) enforces the same set in the database. No
- * login failure, read, observation, version, assessment,
- * recommendation, notification, or reuse-detection codes exist yet
- * — later slices add codes only with an explicit decision. Persisted
- * as the enum name.
+ * see DECISIONS.md ADR-031, then by V22, see DECISIONS.md ADR-032)
+ * enforces the same set in the database. No login failure, read,
+ * observation, version, assessment, recommendation, or notification
+ * codes exist yet — later slices add codes only with an explicit
+ * decision. Persisted as the enum name.
  */
 public enum AuditEventType {
 	AUTH_USER_REGISTERED,
@@ -43,5 +43,15 @@ public enum AuditEventType {
 	 * {@code USER}/user id, empty metadata). Zero-live calls emit
 	 * nothing.
 	 */
-	AUTH_LOGOUT_ALL_SUCCEEDED
+	AUTH_LOGOUT_ALL_SUCCEEDED,
+	/**
+	 * Phase 15-B/2 — refresh-reuse witness (see DECISIONS.md ADR-032):
+	 * emitted post-commit best-effort only when a superseded
+	 * (successor-linked), unexpired refresh-token presentation actually
+	 * revokes at least one live session (actor = owning user derived
+	 * from the superseded row, resource = {@code USER}/user id, empty
+	 * metadata). Repeats, zero-live kills, and every other invalid
+	 * state emit nothing.
+	 */
+	AUTH_REFRESH_REUSE_DETECTED
 }

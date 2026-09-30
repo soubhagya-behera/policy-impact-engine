@@ -1544,4 +1544,32 @@ unchanged at 1213 passing, 0 failures, 0 errors
 - Phase 15-B/1 (decision only) is now complete. Enum, V22
 migration, service, and behavior belong to the following
 implementation slice and are NOT IMPLEMENTED.
+
+Phase 15-B/2 slice implemented and tested successfully
+(refresh-token reuse audit; see DECISIONS.md ADR-032 —
+ADR-029/ADR-031/ADR-032 unchanged, no new ADR):
+- Reuse detection: `rotate()` superseded branch captures the family
+revocation count and raises `RefreshReuseDetectedException extends
+InvalidRefreshTokenException` (owning userId + revoked-live count
+only; same type hierarchy and message, no token/digest/successor/
+secret material) when count >= 1, after the rotation transaction
+commits; zero-live kills and all other invalid states keep the exact
+normal invalid signal; success path byte-identical
+- Revocation: existing DB predicates only, no Java locks, no handler/
+rate-limit/SecurityConfig/endpoint-shape change; login issuance,
+TTL, purge, logout, and access-JWT behavior untouched
+- Audit: `AUTH_REFRESH_REUSE_DETECTED` enum value plus Flyway V22
+widening the frozen CHECK from nine codes to exactly ten (verified
+constraint name, V1–V21 untouched, enum/CHECK lockstep); the refresh
+controller appends post-commit best-effort only on actual kills
+(actor = owning user, resource = USER/user id, empty metadata);
+repeats, zero-live, expired, revoked-nonsuccessor, and unknown
+presentations emit nothing; audit failure still yields the same 401
+with revocation intact (no rollback possible — revocation already
+committed)
+- `./mvnw.cmd clean test`: 1230 tests passing (1213 pre-15-B/2 + 17
+new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
+all 22 migrations in Testcontainers; audit verification VALID with
+the new code present; existing rotation/logout suites green)
+- Phase 15-B/2 is now complete.
 Wait for explicit instruction before beginning new work.

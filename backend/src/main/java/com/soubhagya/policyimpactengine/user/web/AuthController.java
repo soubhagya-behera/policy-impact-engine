@@ -21,6 +21,7 @@ import com.soubhagya.policyimpactengine.user.JwtService;
 import com.soubhagya.policyimpactengine.user.LoginResult;
 import com.soubhagya.policyimpactengine.user.LogoutResult;
 import com.soubhagya.policyimpactengine.user.RefreshResult;
+import com.soubhagya.policyimpactengine.user.RefreshReuseDetectedException;
 import com.soubhagya.policyimpactengine.user.RegistrationResult;
 import com.soubhagya.policyimpactengine.user.web.dto.LoginRequest;
 import com.soubhagya.policyimpactengine.user.web.dto.LoginResponse;
@@ -113,13 +114,36 @@ public class AuthController {
 	 * only from the rotation result — never from any caller-supplied
 	 * field. No transaction, audit event, or logging of the raw token
 	 * here.
+	 *
+	 * <p>Phase 15-B/2 — reuse witness (see DECISIONS.md ADR-032): a
+	 * {@link RefreshReuseDetectedException} carries a committed family
+	 * kill, so the {@code AUTH_REFRESH_REUSE_DETECTED} audit is appended
+	 * post-commit best-effort (actor/resource from the exception, empty
+	 * metadata) and the caller still receives the byte-identical uniform
+	 * 401 — including when the audit append itself fails, which never
+	 * rolls back the committed revocation.
 	 */
 	@PostMapping("/refresh")
 	public ResponseEntity<RefreshResponse> refresh(@Valid @RequestBody RefreshRequest request) {
-		RefreshResult rotated = refreshService.rotate(request.refreshToken());
-		String accessToken = jwtService.issueAccessToken(rotated.userId());
-		return ResponseEntity.ok(RefreshResponse.from(accessToken,
-				jwtService.accessTokenExpiresInSeconds(), rotated));
+		try {
+			RefreshResult rotated = refreshService.rotate(request.refreshToken());
+			String accessToken = jwtService.issueAccessToken(rotated.userId());
+			return ResponseEntity.ok(RefreshResponse.from(accessToken,
+					jwtService.accessTokenExpiresInSeconds(), rotated));
+		}
+		catch (RefreshReuseDetectedException reuse) {
+			if (reuse.getRevokedLiveCount() > 0) {
+				try {
+					auditService.append(reuse.getUserId(),
+							AuditEventType.AUTH_REFRESH_REUSE_DETECTED, "USER",
+							reuse.getUserId(), AuditMetadata.empty(), null);
+				}
+				catch (RuntimeException auditFailure) {
+					throw reuse;
+				}
+			}
+			throw reuse;
+		}
 	}
 
 	/**

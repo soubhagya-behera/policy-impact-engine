@@ -46,7 +46,7 @@ class AuditEventTest {
 	}
 
 	@Test
-	void catalogHoldsExactlyTheFirstWaveCodesPlusPolicyArchivedPlusLogout() {
+	void catalogHoldsExactlyTheFirstWaveCodesPlusPolicyArchivedPlusLogoutPlusReuse() {
 		assertThat(AuditEventType.values()).containsExactly(
 				AuditEventType.AUTH_USER_REGISTERED,
 				AuditEventType.AUTH_LOGIN_SUCCEEDED,
@@ -56,7 +56,8 @@ class AuditEventTest {
 				AuditEventType.PRIVACY_PREFERENCE_DELETED,
 				AuditEventType.POLICY_ARCHIVED,
 				AuditEventType.AUTH_LOGOUT_SUCCEEDED,
-				AuditEventType.AUTH_LOGOUT_ALL_SUCCEEDED);
+				AuditEventType.AUTH_LOGOUT_ALL_SUCCEEDED,
+				AuditEventType.AUTH_REFRESH_REUSE_DETECTED);
 	}
 
 	@Test
