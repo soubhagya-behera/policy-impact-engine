@@ -1440,4 +1440,36 @@ admin/bulk delete
 security/rate-limit/JWT redesign, no scheduler/observation/
 fan-out behavior change
 - Phase 14-C is now complete.
+
+Phase 15-A/1 slice completed as a planning/decision slice
+(logout & session revocation contract; see DECISIONS.md ADR-031 —
+ADR-029 unchanged, no new migration, no endpoints, no production
+behavior change):
+- Contract: anonymous `POST /api/v1/auth/logout`
+(`{refreshToken}` → revoke presented session only, idempotent
+204 on unknown/expired/revoked/superseded with no family kill
+and no oracle; missing/blank → 400) and authenticated
+`POST /api/v1/auth/logout-all` (no body, identity only from the
+Bearer principal → revoke all live sessions, idempotent 204
+including zero-live; missing/invalid JWT → 401)
+- Audit: exactly two new codes, `AUTH_LOGOUT_SUCCEEDED`
+(single) and `AUTH_LOGOUT_ALL_SUCCEEDED` (all), emitted
+post-commit best-effort only on actual revocation (actor =
+owning user, resource = USER/user id, empty metadata, no
+token/digest/secret); repeats/unknown/expired/zero-live emit
+nothing; reuse-detection audit stays deferred
+- Migration: Flyway V21 reserved for the implementation slice
+(widen `audit_event_event_type_check` from seven codes to nine;
+no table/column/index/data change; V1–V20 untouched); no
+migration file in this slice
+- Stateless access JWTs are NOT revoked and remain valid until
+`exp`; no denylist/Redis/roles/OAuth2; concurrency/idempotency
+via DB predicates only; rate limiting reuses existing tiers
+(`auth-refresh:<ip>` 10/min/IP for logout, per-user `api`
+600/min for logout-all) with no new budgets
+- `./mvnw.cmd clean test`: not re-run (docs/decision-only slice;
+no Java, resource, or migration change); suite state unchanged
+- Phase 15-A/1 (decision only) is now complete. Endpoints,
+services, V21 migration, and behavior belong to the following
+implementation slice and are NOT IMPLEMENTED.
 Wait for explicit instruction before beginning new work.
