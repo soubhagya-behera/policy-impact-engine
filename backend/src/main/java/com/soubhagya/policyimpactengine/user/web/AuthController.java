@@ -1,8 +1,10 @@
 package com.soubhagya.policyimpactengine.user.web;
 
 import java.net.URI;
+import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -12,14 +14,17 @@ import com.soubhagya.policyimpactengine.audit.application.AuditService;
 import com.soubhagya.policyimpactengine.audit.domain.AuditEventType;
 import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.user.AuthLoginService;
+import com.soubhagya.policyimpactengine.user.AuthLogoutService;
 import com.soubhagya.policyimpactengine.user.AuthRefreshService;
 import com.soubhagya.policyimpactengine.user.AuthRegistrationService;
 import com.soubhagya.policyimpactengine.user.JwtService;
 import com.soubhagya.policyimpactengine.user.LoginResult;
+import com.soubhagya.policyimpactengine.user.LogoutResult;
 import com.soubhagya.policyimpactengine.user.RefreshResult;
 import com.soubhagya.policyimpactengine.user.RegistrationResult;
 import com.soubhagya.policyimpactengine.user.web.dto.LoginRequest;
 import com.soubhagya.policyimpactengine.user.web.dto.LoginResponse;
+import com.soubhagya.policyimpactengine.user.web.dto.LogoutRequest;
 import com.soubhagya.policyimpactengine.user.web.dto.RefreshRequest;
 import com.soubhagya.policyimpactengine.user.web.dto.RefreshResponse;
 import com.soubhagya.policyimpactengine.user.web.dto.RegisterRequest;
@@ -46,6 +51,16 @@ import jakarta.validation.Valid;
  * silent. An audit failure propagates without undoing the committed
  * business state (see DECISIONS.md ADR-022). No credential, token,
  * or secret ever enters audit metadata.
+ *
+ * <p>Phase 15-A/2 adds logout (see DECISIONS.md ADR-031):
+ * anonymous {@code POST /api/v1/auth/logout} revokes the presented
+ * refresh session (idempotent {@code 204 No Content} on every token
+ * state, never 401/403/404 for token state) and authenticated
+ * {@code POST /api/v1/auth/logout-all} revokes every live session of
+ * the principal (idempotent {@code 204}). {@code AUTH_LOGOUT_SUCCEEDED}
+ * / {@code AUTH_LOGOUT_ALL_SUCCEEDED} are emitted post-commit only on
+ * actual revocation; no-ops stay silent. No raw token, digest, or
+ * secret is ever logged or audited.
  */
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -54,18 +69,21 @@ public class AuthController {
 	private final AuthRegistrationService registrationService;
 	private final AuthLoginService loginService;
 	private final AuthRefreshService refreshService;
+	private final AuthLogoutService logoutService;
 	private final JwtService jwtService;
 	private final AuditService auditService;
 
 	public AuthController(AuthRegistrationService registrationService, AuthLoginService loginService,
-			AuthRefreshService refreshService, JwtService jwtService, AuditService auditService) {
+			AuthRefreshService refreshService, AuthLogoutService logoutService,
+			JwtService jwtService, AuditService auditService) {
 		if (registrationService == null || loginService == null || refreshService == null
-				|| jwtService == null || auditService == null) {
+				|| logoutService == null || jwtService == null || auditService == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.registrationService = registrationService;
 		this.loginService = loginService;
 		this.refreshService = refreshService;
+		this.logoutService = logoutService;
 		this.jwtService = jwtService;
 		this.auditService = auditService;
 	}
@@ -102,5 +120,43 @@ public class AuthController {
 		String accessToken = jwtService.issueAccessToken(rotated.userId());
 		return ResponseEntity.ok(RefreshResponse.from(accessToken,
 				jwtService.accessTokenExpiresInSeconds(), rotated));
+	}
+
+	/**
+	 * Phase 15-A/2 — anonymous single-session logout (see DECISIONS.md
+	 * ADR-031). Revokes the presented refresh session when it is still
+	 * live; unknown, expired, revoked, and superseded tokens all yield
+	 * the same idempotent {@code 204 No Content} with no family
+	 * revocation and no audit event. Identity for the audit witness
+	 * comes only from the revoked row — never from request data. No
+	 * transaction, token return, or raw-token logging here.
+	 */
+	@PostMapping("/logout")
+	public ResponseEntity<Void> logout(@Valid @RequestBody LogoutRequest request) {
+		LogoutResult result = logoutService.logoutSingle(request.refreshToken());
+		if (result.revoked()) {
+			auditService.append(result.userId(), AuditEventType.AUTH_LOGOUT_SUCCEEDED, "USER",
+					result.userId(), AuditMetadata.empty(), null);
+		}
+		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * Phase 15-A/2 — authenticated all-sessions logout (see DECISIONS.md
+	 * ADR-031). Revokes every live refresh session of the principal,
+	 * resolved exclusively from the authenticated principal; zero live
+	 * rows is a successful no-op. Missing or invalid tokens keep the
+	 * existing 401 behavior. No request body, no client-supplied
+	 * identity, no raw-token logging here.
+	 */
+	@PostMapping("/logout-all")
+	public ResponseEntity<Void> logoutAll(Authentication authentication) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		LogoutResult result = logoutService.logoutAll(userId);
+		if (result.revoked()) {
+			auditService.append(userId, AuditEventType.AUTH_LOGOUT_ALL_SUCCEEDED, "USER",
+					userId, AuditMetadata.empty(), null);
+		}
+		return ResponseEntity.noContent().build();
 	}
 }

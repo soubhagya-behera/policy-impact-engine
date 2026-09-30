@@ -59,10 +59,33 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 			@Param("now") Instant now);
 
 	/**
+	 * Phase 15-A/2 — revokes exactly one live token for single-session
+	 * logout (see DECISIONS.md ADR-031). Stamps {@code revokedAt} without
+	 * a successor link, but only when the row is still unrevoked and
+	 * unexpired. Unknown, expired, revoked, and superseded digests match
+	 * nothing; the caller treats every 0 identically (idempotent 204,
+	 * no oracle, no family revocation).
+	 *
+	 * @return 1 when this caller revoked the row, 0 otherwise
+	 */
+	@Transactional
+	@Modifying(clearAutomatically = true)
+	@Query("UPDATE RefreshToken token SET token.revokedAt = :revokedAt"
+			+ " WHERE token.tokenHash = :tokenHash AND token.revokedAt IS NULL"
+			+ " AND token.expiresAt > :now")
+	int revokeToken(@Param("tokenHash") String tokenHash,
+			@Param("revokedAt") Instant revokedAt,
+			@Param("now") Instant now);
+
+	/**
 	 * Revokes every live token of the user (unrevoked and unexpired at
 	 * {@code now}) for reuse containment. Already-revoked and expired
 	 * rows match nothing, so detection linkage on superseded rows is
 	 * preserved.
+	 *
+	 * <p>Phase 15-A/2 reuses this predicate for logout-all (see
+	 * DECISIONS.md ADR-031): revoking the principal's whole live family
+	 * in one bulk update with the same DB serialization.
 	 *
 	 * @return the number of rows revoked by this call
 	 */

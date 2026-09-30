@@ -36,9 +36,11 @@ import jakarta.servlet.http.HttpServletResponse;
  * <p>Stateless REST posture: CSRF, HTTP Basic, form login, and logout
  * are disabled and no server-side session is ever created.
  * {@code POST /api/v1/auth/register},
- * {@code POST /api/v1/auth/login}, and
- * {@code POST /api/v1/auth/refresh} stay permitted; everything else
- * defaults to authenticated so every endpoint added after this slice
+ * {@code POST /api/v1/auth/login},
+ * {@code POST /api/v1/auth/refresh}, and
+ * {@code POST /api/v1/auth/logout} stay permitted; everything else
+ * (including {@code POST /api/v1/auth/logout-all}) defaults to
+ * authenticated so every endpoint added after this slice
  * is locked unless explicitly opened.
  *
  * <p>Phase 8B adds Bearer-token authentication before authorization:
@@ -101,6 +103,7 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
 						.requestMatchers(HttpMethod.OPTIONS, "/api/**").permitAll()
 						.anyRequest().authenticated())
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

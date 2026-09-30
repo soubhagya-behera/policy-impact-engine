@@ -17,28 +17,31 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Phase 14-C/1 — Testcontainers schema/catalog tests for Flyway V20
- * (see DECISIONS.md ADR-030).
+ * Phase 15-A/2 — Testcontainers schema/catalog tests for Flyway V21
+ * (see DECISIONS.md ADR-031).
  *
- * <p>Proves V1–V20 apply cleanly with V19 untouched, the
- * {@code event_type} CHECK is the verified V17 constraint
- * {@code audit_event_event_type_check} widened to exactly seven
- * codes, all seven codes persist, unknown codes are still rejected,
- * and no extra schema objects were introduced. No audit emission,
- * service behavior, or domain logic is exercised here.
+ * <p>Proves V1–V21 apply cleanly with V1–V20 untouched, the
+ * {@code event_type} CHECK is still the verified V17 constraint
+ * {@code audit_event_event_type_check} widened to exactly nine codes,
+ * the enum and the CHECK stay in lockstep, all nine codes persist,
+ * unknown codes are still rejected, and no extra schema objects were
+ * introduced. No audit emission, service behavior, or domain logic is
+ * exercised here.
  */
 @SpringBootTest
 @Testcontainers
-class AuditEventCatalogV20Test {
+class AuditEventCatalogV21Test {
 
-	private static final List<String> SEVEN_CODES = List.of(
+	private static final List<String> NINE_CODES = List.of(
 			"AUTH_USER_REGISTERED",
 			"AUTH_LOGIN_SUCCEEDED",
 			"POLICY_REGISTERED",
 			"POLICY_OWNER_ASSIGNED",
 			"PRIVACY_PREFERENCE_UPSERTED",
 			"PRIVACY_PREFERENCE_DELETED",
-			"POLICY_ARCHIVED");
+			"POLICY_ARCHIVED",
+			"AUTH_LOGOUT_SUCCEEDED",
+			"AUTH_LOGOUT_ALL_SUCCEEDED");
 
 	@Container
 	@ServiceConnection
@@ -56,9 +59,9 @@ class AuditEventCatalogV20Test {
 	}
 
 	@Test
-	void v20MigrationApplies() {
+	void v21MigrationApplies() {
 		Integer applied = jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM flyway_schema_history WHERE version='20' AND success=true",
+				"SELECT count(*) FROM flyway_schema_history WHERE version='21' AND success=true",
 				Integer.class);
 		assertThat(applied).isEqualTo(1);
 	}
@@ -74,15 +77,15 @@ class AuditEventCatalogV20Test {
 	}
 
 	@Test
-	void v19RemainsApplied() {
+	void v20RemainsApplied() {
 		Integer applied = jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM flyway_schema_history WHERE version='19' AND success=true",
+				"SELECT count(*) FROM flyway_schema_history WHERE version='20' AND success=true",
 				Integer.class);
 		assertThat(applied).isEqualTo(1);
 	}
 
 	@Test
-	void eventTypeConstraintIsTheVerifiedNameWithSevenCodes() {
+	void eventTypeConstraintIsTheVerifiedNameWithNineCodes() {
 		String name = jdbcTemplate.queryForObject(
 				"SELECT conname FROM pg_constraint WHERE conrelid='audit_event'::regclass "
 						+ "AND contype='c' AND pg_get_constraintdef(oid) LIKE '%event_type%'",
@@ -93,30 +96,45 @@ class AuditEventCatalogV20Test {
 				"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname=?",
 				String.class, "audit_event_event_type_check");
 		assertThat(definition).isNotNull();
-		for (String code : SEVEN_CODES) {
+		for (String code : NINE_CODES) {
 			assertThat(definition).contains("'" + code + "'");
 		}
 	}
 
 	@Test
-	void allSevenCodesPersist() {
+	void enumAndCheckStayInLockstep() {
+		List<String> enumCodes = java.util.Arrays.stream(AuditEventType.values())
+				.map(Enum::name).sorted().toList();
+		assertThat(enumCodes).containsExactlyInAnyOrderElementsOf(NINE_CODES);
+
+		String definition = jdbcTemplate.queryForObject(
+				"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname=?",
+				String.class, "audit_event_event_type_check");
+		assertThat(definition).isNotNull();
+		for (String code : enumCodes) {
+			assertThat(definition).contains("'" + code + "'");
+		}
+	}
+
+	@Test
+	void allNineCodesPersist() {
 		String previous = null;
-		for (int i = 0; i < SEVEN_CODES.size(); i++) {
+		for (int i = 0; i < NINE_CODES.size(); i++) {
 			String eventHash = hash((char) ('p' + i));
 			jdbcTemplate.update(
 					"INSERT INTO audit_event (id, occurred_at, event_type, prev_hash, event_hash) "
 							+ "VALUES (gen_random_uuid(), "
 							+ "TIMESTAMP '2026-09-28 10:00:00+00' + (? || ' seconds')::interval, "
 							+ "?, ?, ?)",
-					i, SEVEN_CODES.get(i), previous, eventHash);
+					i, NINE_CODES.get(i), previous, eventHash);
 			previous = eventHash;
 		}
 
 		assertThat(jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM audit_event", Integer.class)).isEqualTo(7);
+				"SELECT count(*) FROM audit_event", Integer.class)).isEqualTo(9);
 		assertThat(jdbcTemplate.queryForList(
 				"SELECT DISTINCT event_type FROM audit_event ORDER BY event_type", String.class))
-				.containsExactlyInAnyOrderElementsOf(SEVEN_CODES);
+				.containsExactlyInAnyOrderElementsOf(NINE_CODES);
 	}
 
 	@Test

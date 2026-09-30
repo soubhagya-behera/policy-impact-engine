@@ -101,6 +101,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
 				&& "/api/v1/auth/refresh".equals(path)) {
 			return rateLimitService.refreshAttempt(clientIp);
 		}
+		// Phase 15-A/2 — logout shares the existing auth-refresh tier
+		// (see DECISIONS.md ADR-031 §10): same anonymous IP-keyed
+		// 10/min budget as refresh, no new limiter mechanism. Logout-all
+		// intentionally has no branch: authenticated callers fall through
+		// to the per-user api tier below, anonymous callers to the
+		// anonymous tier and then their downstream 401.
+		if ("POST".equalsIgnoreCase(method)
+				&& "/api/v1/auth/logout".equals(path)) {
+			return rateLimitService.refreshAttempt(clientIp);
+		}
 		UUID userId = trustedUserId();
 		if ("POST".equalsIgnoreCase(method)
 				&& path.startsWith("/api/v1/me/impact-assessments/")

@@ -52,6 +52,11 @@ class AuthControllerRefreshTest {
 	@MockitoBean
 	private AuthRefreshService refreshService;
 
+	// Phase 15-A/2: logout dependencies; mocked so the refresh slice
+	// stays isolated.
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.user.AuthLogoutService logoutService;
+
 	@MockitoBean
 	private JwtService jwtService;
 

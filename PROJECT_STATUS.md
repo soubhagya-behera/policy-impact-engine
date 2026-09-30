@@ -1472,4 +1472,37 @@ no Java, resource, or migration change); suite state unchanged
 - Phase 15-A/1 (decision only) is now complete. Endpoints,
 services, V21 migration, and behavior belong to the following
 implementation slice and are NOT IMPLEMENTED.
+
+Phase 15-A/2 slice implemented and tested successfully
+(logout & session revocation; see DECISIONS.md ADR-031 —
+ADR-029/ADR-031 unchanged, no new ADR):
+- Logout service: `AuthLogoutService` single-session revoke via the
+new `revokeToken` predicate (live → revoked with owner id; unknown/
+expired/revoked/superseded → idempotent no-op, never a family kill)
+and logout-all via the existing bulk family predicate (zero-live →
+no-op); DB predicates only, no Java locks, raw tokens hashed in
+memory and never logged
+- Endpoints: anonymous `POST /api/v1/auth/logout`
+(`{refreshToken}` → 204 empty body on every token state; missing/
+blank → 400; never 401/403/404 for token state) and authenticated
+`POST /api/v1/auth/logout-all` (principal-only identity, no body →
+204; missing/invalid JWT → existing 401; never 403/404);
+`SecurityConfig` permits logout only; access JWTs stay valid until
+`exp` (no denylist/Redis/roles/OAuth2/new dependencies)
+- Rate limiting: logout shares the existing `auth-refresh:<ip>`
+10/min/IP tier (429 precedes validation); logout-all rides the
+existing per-user `api` tier; no new mechanism, `X-Forwarded-For`
+untrusted, locked 429 + `Retry-After` preserved
+- Audit: `AUTH_LOGOUT_SUCCEEDED` / `AUTH_LOGOUT_ALL_SUCCEEDED` enum
+values plus Flyway V21 widening the frozen CHECK from seven codes
+to exactly nine (verified constraint name, V1–V20 untouched,
+enum/CHECK lockstep); post-commit best-effort emission only on
+actual revocation (actor = owning user, resource = USER/user id,
+empty metadata, no token/digest/secret); no-ops silent; audit
+failure never rolls back revocation
+- `./mvnw.cmd clean test`: 1213 tests passing (1181 pre-15-A/2 + 32
+new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
+all 21 migrations in Testcontainers; audit verification VALID after
+both logout event types)
+- Phase 15-A/2 is now complete.
 Wait for explicit instruction before beginning new work.
