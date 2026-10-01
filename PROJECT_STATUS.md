@@ -1614,4 +1614,39 @@ unchanged at 1230 passing, 0 failures, 0 errors
 - Phase 16-A/1 (decision only) is now complete. Endpoint, service,
 V23 migration, and behavior belong to the following
 implementation slice and are NOT IMPLEMENTED.
+
+Phase 16-A/2 slice implemented and tested successfully
+(policy reactivation; see DECISIONS.md ADR-033 —
+ADR-030/ADR-033 unchanged, no new ADR):
+- Service: separate `PolicyReactivationService` (archive service
+behavior untouched) with the mirror `ARCHIVED → ACTIVE` election via
+the new `reactivateOwnedArchived` predicate (id + owner_id + status,
+status column only, one short transaction, no Java locks); actual
+transition → true, already-active → silent false, unknown/foreign →
+404; lost elections re-reading owned-`ARCHIVED` re-enter bounded
+re-election (last-writer-wins vs archive); no history, scheduling,
+or ownership writes; no observation triggered
+- Endpoint: authenticated `POST
+/api/v1/policies/{policyId}/reactivate` (no body, principal-only
+identity → 204 empty body on transition and repeats; unknown/
+foreign → 404 never 403; malformed UUID → 400; missing/invalid JWT
+→ 401; no client identity, no PUT/PATCH, no restore/unarchive
+terms); authenticated by default, no `SecurityConfig` opening, no
+new rate-limit tier
+- Audit: `POLICY_REACTIVATED` enum value plus Flyway V23 widening
+the frozen CHECK from ten codes to exactly eleven (verified
+constraint name, V1–V22 untouched, enum/CHECK lockstep);
+post-commit best-effort only on actual transition (actor = owning
+reactivator, resource = POLICY/policy id, empty metadata, no
+URL/content/secret); repeats/404s silent; concurrent winners emit
+exactly one event; failure never rolls back `ACTIVE`
+- Scheduler/non-eager: no scheduler, observation, retry, or fan-out
+code change; reactivation writes no attempt and preserves the frozen
+`next_check_at`, and the reactivated policy is selected by the
+unchanged due query (normal tick resumes monitoring)
+- `./mvnw.cmd clean test`: 1258 tests passing (1230 pre-16-A/2 + 28
+new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
+all 23 migrations in Testcontainers; audit verification VALID with
+the new code present; archive/delete and full lifecycle suites green)
+- Phase 16-A/2 is now complete.
 Wait for explicit instruction before beginning new work.

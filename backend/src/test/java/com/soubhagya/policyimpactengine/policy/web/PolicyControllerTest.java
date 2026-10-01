@@ -56,6 +56,11 @@ class PolicyControllerTest {
 	@MockitoBean
 	private com.soubhagya.policyimpactengine.policy.application.PolicyArchiveService archive;
 
+	// Phase 16-A/2: PolicyController also serves reactivation; mocked
+	// so this slice stays isolated.
+	@MockitoBean
+	private com.soubhagya.policyimpactengine.policy.application.PolicyReactivationService reactivation;
+
 	// Phase 14-B/1: PolicyController also serves the version-history
 	// reads; mocked so this slice stays isolated.
 	@MockitoBean

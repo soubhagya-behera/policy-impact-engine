@@ -21,6 +21,7 @@ import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyArchiveService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyReactivationService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyChangeReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService;
 import com.soubhagya.policyimpactengine.policy.web.dto.ChangeRecordResponse;
@@ -46,6 +47,10 @@ import jakarta.validation.Valid;
  * <p>Deletion archives the owned policy through the same
  * principal-only identity; repeats stay {@code 204 No Content}.
  *
+ * <p>Phase 16-A/2 reactivates the owned archived policy through the
+ * same principal-only identity (see DECISIONS.md ADR-033); repeats
+ * stay {@code 204 No Content}.
+ *
  * <p>Phase 11C emits {@code POLICY_REGISTERED} after the policy
  * row commits. Reads, observations, and failed registrations never
  * reach the emit line. No policy URL or content enters metadata.
@@ -56,19 +61,21 @@ public class PolicyController {
 
 	private final PolicyService service;
 	private final PolicyArchiveService archive;
+	private final PolicyReactivationService reactivation;
 	private final PolicyVersionReadService versions;
 	private final PolicyChangeReadService changes;
 	private final AuditService auditService;
 
 	public PolicyController(PolicyService service, PolicyArchiveService archive,
-			PolicyVersionReadService versions,
+			PolicyReactivationService reactivation, PolicyVersionReadService versions,
 			PolicyChangeReadService changes, AuditService auditService) {
-		if (service == null || archive == null || versions == null || changes == null
-				|| auditService == null) {
+		if (service == null || archive == null || reactivation == null || versions == null
+				|| changes == null || auditService == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.service = service;
 		this.archive = archive;
+		this.reactivation = reactivation;
 		this.versions = versions;
 		this.changes = changes;
 		this.auditService = auditService;
@@ -121,6 +128,23 @@ public class PolicyController {
 			@PathVariable UUID policyId) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
 		archive.archive(userId, policyId);
+		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * Phase 16-A/2 — owner-scoped reactivation (ADR-033). Thin:
+	 * resolves the user id exclusively from the authenticated
+	 * principal and delegates to {@link PolicyReactivationService}. A
+	 * real {@code ARCHIVED → ACTIVE} transition and an already-active
+	 * repeat both yield {@code 204 No Content} with an empty body; a
+	 * foreign or unknown policy behaves as not-found. No request
+	 * body, no client-supplied identity, no eager observation.
+	 */
+	@PostMapping("/{policyId}/reactivate")
+	public ResponseEntity<Void> reactivate(Authentication authentication,
+			@PathVariable UUID policyId) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		reactivation.reactivate(userId, policyId);
 		return ResponseEntity.noContent().build();
 	}
 

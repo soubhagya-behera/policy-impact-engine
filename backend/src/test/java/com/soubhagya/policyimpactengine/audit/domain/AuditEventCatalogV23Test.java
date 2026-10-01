@@ -18,22 +18,22 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Phase 15-B/2 — Testcontainers schema/catalog tests for Flyway V22
- * (see DECISIONS.md ADR-032).
+ * Phase 16-A/2 — Testcontainers schema/catalog tests for Flyway V23
+ * (see DECISIONS.md ADR-033).
  *
- * <p>Proves V1–V22 apply cleanly with V1–V21 untouched, the
+ * <p>Proves V1–V23 apply cleanly with V1–V22 untouched, the
  * {@code event_type} CHECK is still the verified V17 constraint
- * {@code audit_event_event_type_check} widened to exactly ten codes,
- * the enum and the CHECK stay in lockstep, all ten codes persist, a
- * bogus code is still rejected, and no extra schema objects were
- * introduced. No audit emission, service behavior, or domain logic is
- * exercised here.
+ * {@code audit_event_event_type_check} widened to exactly eleven
+ * codes, the enum and the CHECK stay in lockstep, all eleven codes
+ * persist, a bogus code is still rejected, and no extra schema objects
+ * were introduced. No audit emission, service behavior, or domain
+ * logic is exercised here.
  */
 @SpringBootTest
 @Testcontainers
-class AuditEventCatalogV22Test {
+class AuditEventCatalogV23Test {
 
-	private static final List<String> TEN_CODES = List.of(
+	private static final List<String> ELEVEN_CODES = List.of(
 			"AUTH_USER_REGISTERED",
 			"AUTH_LOGIN_SUCCEEDED",
 			"POLICY_REGISTERED",
@@ -43,7 +43,8 @@ class AuditEventCatalogV22Test {
 			"POLICY_ARCHIVED",
 			"AUTH_LOGOUT_SUCCEEDED",
 			"AUTH_LOGOUT_ALL_SUCCEEDED",
-			"AUTH_REFRESH_REUSE_DETECTED");
+			"AUTH_REFRESH_REUSE_DETECTED",
+			"POLICY_REACTIVATED");
 
 	@Container
 	@ServiceConnection
@@ -61,9 +62,9 @@ class AuditEventCatalogV22Test {
 	}
 
 	@Test
-	void v22MigrationApplies() {
+	void v23MigrationApplies() {
 		Integer applied = jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM flyway_schema_history WHERE version='22' AND success=true",
+				"SELECT count(*) FROM flyway_schema_history WHERE version='23' AND success=true",
 				Integer.class);
 		assertThat(applied).isEqualTo(1);
 	}
@@ -79,15 +80,15 @@ class AuditEventCatalogV22Test {
 	}
 
 	@Test
-	void v21RemainsApplied() {
+	void v22RemainsApplied() {
 		Integer applied = jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM flyway_schema_history WHERE version='21' AND success=true",
+				"SELECT count(*) FROM flyway_schema_history WHERE version='22' AND success=true",
 				Integer.class);
 		assertThat(applied).isEqualTo(1);
 	}
 
 	@Test
-	void eventTypeConstraintIsTheVerifiedNameWithTenCodes() {
+	void eventTypeConstraintIsTheVerifiedNameWithElevenCodes() {
 		String name = jdbcTemplate.queryForObject(
 				"SELECT conname FROM pg_constraint WHERE conrelid='audit_event'::regclass "
 						+ "AND contype='c' AND pg_get_constraintdef(oid) LIKE '%event_type%'",
@@ -98,51 +99,45 @@ class AuditEventCatalogV22Test {
 				"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname=?",
 				String.class, "audit_event_event_type_check");
 		assertThat(definition).isNotNull();
-		for (String code : TEN_CODES) {
+		for (String code : ELEVEN_CODES) {
 			assertThat(definition).contains("'" + code + "'");
 		}
 	}
 
-	/**
-	 * Phase 16-A/2 — V23 widened the catalog to eleven codes (see DECISIONS.md
-	 * ADR-033), so exact equality lives in {@code AuditEventCatalogV23Test}.
-	 * This V22-era test now proves the subset it introduced: all ten V22
-	 * codes remain in both the enum and the CHECK.
-	 */
 	@Test
-	void v22CodesRemainInEnumAndCheck() {
+	void enumAndCheckStayInLockstep() {
 		List<String> enumCodes = Arrays.stream(AuditEventType.values())
 				.map(Enum::name).sorted().toList();
-		assertThat(enumCodes).containsAll(TEN_CODES);
+		assertThat(enumCodes).containsExactlyInAnyOrderElementsOf(ELEVEN_CODES);
 
 		String definition = jdbcTemplate.queryForObject(
 				"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname=?",
 				String.class, "audit_event_event_type_check");
 		assertThat(definition).isNotNull();
-		for (String code : TEN_CODES) {
+		for (String code : enumCodes) {
 			assertThat(definition).contains("'" + code + "'");
 		}
 	}
 
 	@Test
-	void allTenCodesPersist() {
+	void allElevenCodesPersist() {
 		String previous = null;
-		for (int i = 0; i < TEN_CODES.size(); i++) {
+		for (int i = 0; i < ELEVEN_CODES.size(); i++) {
 			String eventHash = hash((char) ('p' + i));
 			jdbcTemplate.update(
 					"INSERT INTO audit_event (id, occurred_at, event_type, prev_hash, event_hash) "
 							+ "VALUES (gen_random_uuid(), "
 							+ "TIMESTAMP '2026-09-28 10:00:00+00' + (? || ' seconds')::interval, "
 							+ "?, ?, ?)",
-					i, TEN_CODES.get(i), previous, eventHash);
+					i, ELEVEN_CODES.get(i), previous, eventHash);
 			previous = eventHash;
 		}
 
 		assertThat(jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM audit_event", Integer.class)).isEqualTo(10);
+				"SELECT count(*) FROM audit_event", Integer.class)).isEqualTo(11);
 		assertThat(jdbcTemplate.queryForList(
 				"SELECT DISTINCT event_type FROM audit_event ORDER BY event_type", String.class))
-				.containsExactlyInAnyOrderElementsOf(TEN_CODES);
+				.containsExactlyInAnyOrderElementsOf(ELEVEN_CODES);
 	}
 
 	@Test

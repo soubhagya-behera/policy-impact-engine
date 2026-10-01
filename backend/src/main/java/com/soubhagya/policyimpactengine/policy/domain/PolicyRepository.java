@@ -76,4 +76,28 @@ public interface PolicyRepository extends JpaRepository<Policy, UUID> {
 	int archiveOwnedActive(@Param("id") UUID id, @Param("ownerId") UUID ownerId,
 			@Param("active") PolicyStatus active, @Param("archived") PolicyStatus archived);
 
+	/**
+	 * Phase 16-A/2 — atomic reactivation election: transitions exactly one
+	 * owned {@code ARCHIVED} policy to {@code ACTIVE} (see DECISIONS.md
+	 * ADR-033). The {@code id} + {@code owner_id} + {@code status}
+	 * conjuncts make ownership and transition atomic: a foreign, unknown,
+	 * or already-active row matches nothing. Only the {@code status}
+	 * column is written — scheduling, history, and ownership columns are
+	 * never touched. The persistence context is cleared so callers
+	 * re-read the freshly reactivated row instead of a stale pre-transition
+	 * instance.
+	 *
+	 * @return 1 when this caller won the transition (it must then emit
+	 *         the single {@code POLICY_REACTIVATED} audit event), 0 when
+	 *         the row was foreign, unknown, or already active (the
+	 *         caller must emit nothing)
+	 */
+	@Transactional
+	@Modifying(clearAutomatically = true)
+	@Query("UPDATE Policy policy SET policy.status = :active"
+			+ " WHERE policy.id = :id AND policy.owner.id = :ownerId"
+			+ " AND policy.status = :archived")
+	int reactivateOwnedArchived(@Param("id") UUID id, @Param("ownerId") UUID ownerId,
+			@Param("archived") PolicyStatus archived, @Param("active") PolicyStatus active);
+
 }

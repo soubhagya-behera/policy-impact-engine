@@ -4,13 +4,13 @@ package com.soubhagya.policyimpactengine.audit.domain;
  * Phase 11A — frozen first-wave audit event catalog (see DECISIONS.md
  * ADR-023 §12).
  *
- * <p>Exactly these ten codes may be persisted; the {@code event_type}
+ * <p>Exactly these eleven codes may be persisted; the {@code event_type}
  * CHECK in V17 (widened by V20, see DECISIONS.md ADR-030, then by V21,
- * see DECISIONS.md ADR-031, then by V22, see DECISIONS.md ADR-032)
- * enforces the same set in the database. No login failure, read,
- * observation, version, assessment, recommendation, or notification
- * codes exist yet — later slices add codes only with an explicit
- * decision. Persisted as the enum name.
+ * see DECISIONS.md ADR-031, then by V22, see DECISIONS.md ADR-032,
+ * then by V23, see DECISIONS.md ADR-033) enforces the same set in the
+ * database. No login failure, read, observation, version, assessment,
+ * recommendation, or notification codes exist yet — later slices add
+ * codes only with an explicit decision. Persisted as the enum name.
  */
 public enum AuditEventType {
 	AUTH_USER_REGISTERED,
@@ -53,5 +53,14 @@ public enum AuditEventType {
 	 * metadata). Repeats, zero-live kills, and every other invalid
 	 * state emit nothing.
 	 */
-	AUTH_REFRESH_REUSE_DETECTED
+	AUTH_REFRESH_REUSE_DETECTED,
+	/**
+	 * Phase 16-A/2 — reactivation witness (see DECISIONS.md ADR-033):
+	 * emitted post-commit best-effort only when an owned archived
+	 * policy actually transitions {@code ARCHIVED → ACTIVE} (actor =
+	 * owning reactivator, resource = {@code POLICY}/policy id, empty
+	 * metadata). Already-active repeats, reads, and not-found cases
+	 * emit nothing.
+	 */
+	POLICY_REACTIVATED
 }
