@@ -1572,4 +1572,46 @@ new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
 all 22 migrations in Testcontainers; audit verification VALID with
 the new code present; existing rotation/logout suites green)
 - Phase 15-B/2 is now complete.
+
+Phase 16-A/1 slice completed as a planning/decision slice
+(policy reactivation contract; see DECISIONS.md ADR-033 —
+ADR-030 unchanged, no new migration, no endpoints, no production
+behavior change):
+- Contract: authenticated `POST
+/api/v1/policies/{policyId}/reactivate` (no body, principal-only
+identity) for owned `ARCHIVED → ACTIVE` only — the sole new legal
+transition; actual transition and already-`ACTIVE` repeats both
+204 empty body; unknown/foreign → 404 never 403; malformed UUID →
+400; missing/invalid JWT → 401
+- Transition: single conditional bulk predicate on
+(id + owner_id + status) in one short transaction, status column
+only; concurrent reactivations converge (one winner, all 204);
+reactivation-vs-archive races resolve per predicate,
+last-writer-wins, no Java locks; separate `PolicyReactivationService`
+mirroring `PolicyArchiveService` (no archive-service change)
+- Scheduler: no eager observation, no attempt/state writes — the
+policy simply rejoins the unchanged tick, normally due immediately
+via its frozen pre-archive `next_check_at`; fan-out gates on
+`ACTIVE` unchanged; no scheduler/observation/retry code change
+- Audit: exactly one new code, `POLICY_REACTIVATED` (actor = owning
+reactivator, resource = POLICY/policy id, empty metadata, no
+URL/content/secret), post-commit best-effort only on actual
+transition; repeats/reads/404s silent; failure never rolls back
+`ACTIVE`; concurrent winners emit exactly one event
+- History: all retained rows (versions, changes, matches, impacts,
+assessments, recommendations, notifications, attempts, audit)
+untouched — no backfill, reassessment, or deletion
+- Security: owner-scoped predicate, no roles/admin/transfer, no new
+infrastructure, existing per-user `api` rate-limit tier, no
+access-token change
+- Migration: Flyway V23 reserved for the implementation slice
+(widen `audit_event_event_type_check` from ten codes to eleven;
+no table/column/index/data change; V1–V22 untouched); no
+migration file in this slice
+- `./mvnw.cmd clean test`: not re-run (docs/decision-only slice;
+no Java, resource, migration, or test change); suite state
+unchanged at 1230 passing, 0 failures, 0 errors
+- Phase 16-A/1 (decision only) is now complete. Endpoint, service,
+V23 migration, and behavior belong to the following
+implementation slice and are NOT IMPLEMENTED.
 Wait for explicit instruction before beginning new work.
