@@ -1649,4 +1649,44 @@ new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
 all 23 migrations in Testcontainers; audit verification VALID with
 the new code present; archive/delete and full lifecycle suites green)
 - Phase 16-A/2 is now complete.
+
+Phase 16-B/1 slice completed as a planning/decision slice
+(manual policy check contract; see DECISIONS.md ADR-034 —
+no new migration, no endpoints, no production behavior change):
+- Contract: authenticated `POST
+/api/v1/policies/{policyId}/check` (no body, principal-only
+identity), synchronous terminal semantics — waits for the existing
+MANUAL observation and returns its outcome; no 202/async model
+- Guard order: owner-scoped load (unknown/foreign → 404 never 403)
+then ARCHIVED guard (→ 409 `PolicyArchivedException`, no fetch, no
+attempt, no reactivation); `observe()` itself untouched so
+service-level archived observation keeps working
+- Concurrency: existing V11 claim decides everything — MANUAL/MANUAL
+and MANUAL/SCHEDULED losers (claim rejection → new 409 mapping),
+archive/reactivation races resolve per predicate with the accepted
+mid-observation behavior; orphaned `IN_PROGRESS` rejects until the
+2U.2 sweep; no Java locks, no new infrastructure
+- Terminal mapping: FIRST/NEW → 200 (attempt `SUCCESS`), UNCHANGED
+→ 200 (`SKIPPED_UNCHANGED`, non-error); any observation failure →
+uniform 502 after existing `FAILED` + reschedule (one fetch per
+call, `RetryPolicy` untouched); success never touches
+`next_check_at`
+- Response: new read-model `PolicyCheckResponse` (`policyId`,
+outcome, versionNumber, contentHash, changeCount, attemptStatus —
+no attempt id, no new persistence); failures keep RFC 7807 shapes
+- Fan-out: same `NotificationFanOutService` call as the scheduler
+after successful MANUAL observations (ARCH §25 rule executed);
+fan-out failure isolated → still 200 with the healable gap
+- Rate limit: existing per-user `api` tier (no filter change, no new
+tier); audit: no new event and no migration (attempt history is the
+record per ADR-022 §9; V23 stays the head)
+- Boundaries: small `PolicyCheckService` facade (load → guard →
+observe → fan-out → map), thin controller, no `observe()` change,
+no new repository method
+- `./mvnw.cmd clean test`: not re-run (docs/decision-only slice;
+no Java, resource, migration, or test change); suite state
+unchanged at 1258 passing, 0 failures, 0 errors
+- Phase 16-B/1 (decision only) is now complete. Facade, endpoint,
+DTO, handler entries, and behavior belong to the following
+implementation slice and are NOT IMPLEMENTED.
 Wait for explicit instruction before beginning new work.
