@@ -17,6 +17,9 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchClaimRejectedException;
+import com.soubhagya.policyimpactengine.policy.application.PolicyArchivedException;
+import com.soubhagya.policyimpactengine.policy.fetch.PolicyFetchException;
 import com.soubhagya.policyimpactengine.user.AuthenticationRequiredException;
 import com.soubhagya.policyimpactengine.user.DuplicateEmailException;
 import com.soubhagya.policyimpactengine.user.InvalidCredentialsException;
@@ -48,6 +51,30 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 			InvalidRefreshTokenException.class })
 	public ProblemDetail handleUnauthenticated(RuntimeException ex) {
 		return problem(HttpStatus.UNAUTHORIZED, "Unauthenticated", ex.getMessage());
+	}
+
+	/**
+	 * Phase 16-B/2 — manual-check state conflicts (see DECISIONS.md
+	 * ADR-034): a lost attempt claim (another check already in flight)
+	 * and a check refused on an archived policy both surface as 409
+	 * with their existing deterministic messages.
+	 */
+	@ExceptionHandler({ PolicyFetchClaimRejectedException.class, PolicyArchivedException.class })
+	public ProblemDetail handleCheckConflict(RuntimeException ex) {
+		return problem(HttpStatus.CONFLICT, "Conflict", ex.getMessage());
+	}
+
+	/**
+	 * Phase 16-B/2 — manual-check fetch failures (see DECISIONS.md
+	 * ADR-034): any fetch-layer observation failure surfaces as 502
+	 * after the existing FAILED attempt recording and reschedule. The
+	 * focused mapping covers the operational failure class; only the
+	 * fetch layer throws this type, so no other endpoint's behavior
+	 * changes.
+	 */
+	@ExceptionHandler(PolicyFetchException.class)
+	public ProblemDetail handleBadGateway(PolicyFetchException ex) {
+		return problem(HttpStatus.BAD_GATEWAY, "Bad Gateway", ex.getMessage());
 	}
 
 	@Override

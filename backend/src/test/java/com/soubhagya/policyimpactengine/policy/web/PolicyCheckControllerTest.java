@@ -25,25 +25,28 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.soubhagya.policyimpactengine.monitoring.application.PolicyFetchClaimRejectedException;
 import com.soubhagya.policyimpactengine.policy.application.PolicyArchiveService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyArchivedException;
+import com.soubhagya.policyimpactengine.policy.application.PolicyCheckService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyReactivationService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
+import com.soubhagya.policyimpactengine.policy.web.dto.PolicyCheckResponse;
 import com.soubhagya.policyimpactengine.user.web.AuthenticatedUser;
 import com.soubhagya.policyimpactengine.user.web.JwtAuthenticationFilter;
 
 /**
- * Phase 16-A/2 — web-layer tests for {@code POST
- * /api/v1/policies/{policyId}/reactivate} (see DECISIONS.md ADR-033).
- * The reactivation service is mocked; principal resolution, status
- * codes, empty-body shape, and RFC 7807 problem responses are verified
- * here. Security filters are disabled: the authenticated principal is
- * supplied directly, exactly as the enabled filter chain would publish
- * it. Real reactivation lives in the service integration tests; the
- * enabled-filter proof lives in the reactivation integration test.
+ * Phase 16-B/2 — web-layer tests for {@code POST
+ * /api/v1/policies/{policyId}/check} (see DECISIONS.md ADR-034). The
+ * check facade is mocked; principal resolution, status codes, response
+ * shape, and RFC 7807 problem responses are verified here. Security
+ * filters are disabled: the authenticated principal is supplied
+ * directly, exactly as the enabled filter chain would publish it. Real
+ * observation lives in the service and endpoint integration tests.
  */
 @WebMvcTest(PolicyController.class)
 @AutoConfigureMockMvc(addFilters = false)
-class PolicyReactivationControllerTest {
+class PolicyCheckControllerTest {
 
 	@Autowired
 	private MockMvc mockMvc;
@@ -54,15 +57,13 @@ class PolicyReactivationControllerTest {
 	@MockitoBean
 	private PolicyArchiveService archive;
 
-	// Phase 16-A/2: the reactivate handler delegates here; mocked so
-	// this slice stays isolated from the reactivation transaction.
 	@MockitoBean
 	private PolicyReactivationService reactivation;
 
-	// Phase 16-B/2: PolicyController also serves the manual check; mocked
-	// so this slice stays isolated.
+	// Phase 16-B/2: the check handler delegates here; mocked so this
+	// slice stays isolated from the observation pipeline.
 	@MockitoBean
-	private com.soubhagya.policyimpactengine.policy.application.PolicyCheckService check;
+	private PolicyCheckService check;
 
 	@MockitoBean
 	private com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService versions;
@@ -99,79 +100,99 @@ class PolicyReactivationControllerTest {
 	}
 
 	@Test
-	void reactivateArchivedPolicyReturnsNoContentWithEmptyBody() throws Exception {
+	void checkReturnsTerminalResultBody() throws Exception {
 		UUID policyId = UUID.randomUUID();
-		when(reactivation.reactivate(userId, policyId)).thenReturn(true);
+		PolicyCheckResponse response = new PolicyCheckResponse(policyId, "NEW_VERSION", 2,
+				"a".repeat(64), 3, "SUCCESS");
+		when(check.check(userId, policyId)).thenReturn(response);
 
-		mockMvc.perform(post("/api/v1/policies/{policyId}/reactivate", policyId)
+		mockMvc.perform(post("/api/v1/policies/{policyId}/check", policyId)
 						.principal(authentication))
-				.andExpect(status().isNoContent())
-				.andExpect(content().string(""));
+				.andExpect(status().isOk())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+				.andExpect(jsonPath("$.policyId").value(policyId.toString()))
+				.andExpect(jsonPath("$.outcome").value("NEW_VERSION"))
+				.andExpect(jsonPath("$.versionNumber").value(2))
+				.andExpect(jsonPath("$.contentHash").value("a".repeat(64)))
+				.andExpect(jsonPath("$.changeCount").value(3))
+				.andExpect(jsonPath("$.attemptStatus").value("SUCCESS"));
 
-		verify(reactivation).reactivate(userId, policyId);
+		verify(check).check(userId, policyId);
 	}
 
 	@Test
-	void reactivateAlreadyActivePolicyReturnsNoContent() throws Exception {
+	void checkUnknownPolicyReturnsProblemNotFound() throws Exception {
 		UUID policyId = UUID.randomUUID();
-		when(reactivation.reactivate(userId, policyId)).thenReturn(false);
-
-		mockMvc.perform(post("/api/v1/policies/{policyId}/reactivate", policyId)
-						.principal(authentication))
-				.andExpect(status().isNoContent())
-				.andExpect(content().string(""));
-
-		verify(reactivation).reactivate(userId, policyId);
-	}
-
-	@Test
-	void reactivateUnknownPolicyReturnsProblemNotFound() throws Exception {
-		UUID policyId = UUID.randomUUID();
-		when(reactivation.reactivate(userId, policyId))
+		when(check.check(userId, policyId))
 				.thenThrow(new NoSuchElementException("Policy " + policyId + " not found"));
 
-		mockMvc.perform(post("/api/v1/policies/{policyId}/reactivate", policyId)
+		mockMvc.perform(post("/api/v1/policies/{policyId}/check", policyId)
 						.principal(authentication))
 				.andExpect(status().isNotFound())
-				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-				.andExpect(jsonPath("$.title").value("Resource not found"))
-				.andExpect(jsonPath("$.detail").value("Policy " + policyId + " not found"));
+				.andExpect(jsonPath("$.title").value("Resource not found"));
 	}
 
 	@Test
-	void reactivateRejectsMalformedIdentifier() throws Exception {
-		mockMvc.perform(post("/api/v1/policies/{policyId}/reactivate", "not-a-uuid")
+	void checkArchivedPolicyReturnsProblemConflict() throws Exception {
+		UUID policyId = UUID.randomUUID();
+		when(check.check(userId, policyId)).thenThrow(new PolicyArchivedException(policyId));
+
+		mockMvc.perform(post("/api/v1/policies/{policyId}/check", policyId)
+						.principal(authentication))
+				.andExpect(status().isConflict())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.title").value("Conflict"))
+				.andExpect(jsonPath("$.detail").value(
+						"Policy " + policyId + " is archived; reactivate it before checking"));
+	}
+
+	@Test
+	void checkClaimCollisionReturnsProblemConflict() throws Exception {
+		UUID policyId = UUID.randomUUID();
+		when(check.check(userId, policyId))
+				.thenThrow(new PolicyFetchClaimRejectedException(policyId));
+
+		mockMvc.perform(post("/api/v1/policies/{policyId}/check", policyId)
+						.principal(authentication))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.title").value("Conflict"))
+				.andExpect(jsonPath("$.detail").value("Policy " + policyId
+						+ " already has an in-flight check; refusing duplicate work"));
+	}
+
+	@Test
+	void checkRejectsMalformedIdentifier() throws Exception {
+		mockMvc.perform(post("/api/v1/policies/{policyId}/check", "not-a-uuid")
 						.principal(authentication))
 				.andExpect(status().isBadRequest())
-				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 				.andExpect(jsonPath("$.title").value("Malformed request"));
 
-		verifyNoInteractions(reactivation);
+		verifyNoInteractions(check);
 	}
 
 	@Test
-	void reactivateWithoutPrincipalReturns401() throws Exception {
-		mockMvc.perform(post("/api/v1/policies/{policyId}/reactivate", UUID.randomUUID()))
+	void checkWithoutPrincipalReturns401() throws Exception {
+		mockMvc.perform(post("/api/v1/policies/{policyId}/check", UUID.randomUUID()))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.title").value("Unauthenticated"));
 
-		verifyNoInteractions(reactivation);
+		verifyNoInteractions(check);
 	}
 
 	@Test
 	void clientSuppliedIdentityCannotOverridePrincipal() throws Exception {
 		UUID policyId = UUID.randomUUID();
 		UUID foreignId = UUID.randomUUID();
-		when(reactivation.reactivate(userId, policyId)).thenReturn(true);
+		when(check.check(userId, policyId)).thenReturn(new PolicyCheckResponse(policyId,
+				"UNCHANGED", 1, "b".repeat(64), 0, "SKIPPED_UNCHANGED"));
 
-		mockMvc.perform(post("/api/v1/policies/{policyId}/reactivate", policyId)
+		mockMvc.perform(post("/api/v1/policies/{policyId}/check", policyId)
 						.queryParam("userId", foreignId.toString())
-						.queryParam("ownerId", foreignId.toString())
 						.header("X-User-Id", foreignId.toString())
 						.principal(authentication))
-				.andExpect(status().isNoContent())
-				.andExpect(content().string(""));
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.outcome").value("UNCHANGED"));
 
-		verify(reactivation).reactivate(userId, policyId);
+		verify(check).check(userId, policyId);
 	}
 }

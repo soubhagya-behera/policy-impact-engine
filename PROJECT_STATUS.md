@@ -1689,4 +1689,41 @@ unchanged at 1258 passing, 0 failures, 0 errors
 - Phase 16-B/1 (decision only) is now complete. Facade, endpoint,
 DTO, handler entries, and behavior belong to the following
 implementation slice and are NOT IMPLEMENTED.
+
+Phase 16-B/2 slice implemented and tested successfully
+(manual policy check; see DECISIONS.md ADR-034 —
+ADR-034 unchanged, no new ADR, no migration):
+- Facade: new `PolicyCheckService.check(userId, policyId)`
+(owner-scoped load → 404 unknown/foreign, `ARCHIVED` guard → new
+`PolicyArchivedException`, existing `observe(MANUAL)`, existing
+`fanOut`, read-model mapping); thin controller method `POST
+/{policyId}/check` (no body, principal-only identity; authenticated
+by default, no `SecurityConfig` opening); `observe()`,
+repositories, scheduler, retry, and fan-out code untouched
+- Response: new `PolicyCheckResponse` (`policyId`, outcome,
+versionNumber, contentHash, changeCount from `diff.changes()`,
+attemptStatus `SUCCESS`/`SKIPPED_UNCHANGED` inferred from the
+existing terminal mapping; no attempt id, no entities, no new
+persistence)
+- Terminal mapping: FIRST/NEW/UNCHANGED → 200; claim collisions
+(`MANUAL/MANUAL`, `MANUAL/SCHEDULED`) → 409 reusing the existing
+message (new handler entry); archived → 409 (new type + handler
+entry); fetch-layer failures → uniform 502 `Bad Gateway` (new
+focused handler entry for `PolicyFetchException`; no new exception
+types, no other endpoint's mapping changed)
+- Fan-out: same `NotificationFanOutService` call as the scheduler
+after successful MANUAL observations (assessment/recommendation/
+notification exactly once); fan-out failure isolated → still 200
+with the healable gap; success never touches `next_check_at`
+(proven identical before/after)
+- Rate limit: existing per-user `api` tier consumed (no filter or
+service change; anonymous → existing anonymous tier → 401;
+locked 429 + `Retry-After` preserved)
+- Audit: no new event, no migration (attempt history is the record;
+V23 stays the CHECK head)
+- `./mvnw.cmd clean test`: 1276 tests passing (1258 pre-16-B/2 + 18
+new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
+all 23 migrations in Testcontainers; audit verification VALID;
+archive/reactivation/scheduler suites green)
+- Phase 16-B/2 is now complete.
 Wait for explicit instruction before beginning new work.

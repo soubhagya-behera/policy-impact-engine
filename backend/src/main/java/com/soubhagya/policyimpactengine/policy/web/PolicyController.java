@@ -21,10 +21,12 @@ import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyArchiveService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyCheckService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyReactivationService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyChangeReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService;
 import com.soubhagya.policyimpactengine.policy.web.dto.ChangeRecordResponse;
+import com.soubhagya.policyimpactengine.policy.web.dto.PolicyCheckResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.VersionDiffResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.CreatePolicyRequest;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
@@ -62,20 +64,23 @@ public class PolicyController {
 	private final PolicyService service;
 	private final PolicyArchiveService archive;
 	private final PolicyReactivationService reactivation;
+	private final PolicyCheckService check;
 	private final PolicyVersionReadService versions;
 	private final PolicyChangeReadService changes;
 	private final AuditService auditService;
 
 	public PolicyController(PolicyService service, PolicyArchiveService archive,
-			PolicyReactivationService reactivation, PolicyVersionReadService versions,
+			PolicyReactivationService reactivation, PolicyCheckService check,
+			PolicyVersionReadService versions,
 			PolicyChangeReadService changes, AuditService auditService) {
-		if (service == null || archive == null || reactivation == null || versions == null
-				|| changes == null || auditService == null) {
+		if (service == null || archive == null || reactivation == null || check == null
+				|| versions == null || changes == null || auditService == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.service = service;
 		this.archive = archive;
 		this.reactivation = reactivation;
+		this.check = check;
 		this.versions = versions;
 		this.changes = changes;
 		this.auditService = auditService;
@@ -146,6 +151,20 @@ public class PolicyController {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
 		reactivation.reactivate(userId, policyId);
 		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * Phase 16-B/2 — owner-scoped synchronous manual check (ADR-034).
+	 * Thin: resolves the user id exclusively from the authenticated
+	 * principal and delegates to {@link PolicyCheckService}, which runs
+	 * the existing MANUAL observation to its terminal outcome and maps
+	 * it. No request body, no client-supplied identity.
+	 */
+	@PostMapping("/{policyId}/check")
+	public PolicyCheckResponse check(Authentication authentication,
+			@PathVariable UUID policyId) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		return check.check(userId, policyId);
 	}
 
 	/**
