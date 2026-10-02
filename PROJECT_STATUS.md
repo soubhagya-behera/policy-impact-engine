@@ -1726,4 +1726,43 @@ new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
 all 23 migrations in Testcontainers; audit verification VALID;
 archive/reactivation/scheduler suites green)
 - Phase 16-B/2 is now complete.
+
+Phase 16-C/1 slice completed as a planning/decision slice
+(policy check history contract; see DECISIONS.md ADR-035 —
+no new migration, no endpoints, no production behavior change):
+- Contract: authenticated `GET
+/api/v1/policies/{policyId}/checks` (principal-only identity, bare
+JSON array per ADR-026: page 0/size 20/max 100, 400s, `200 []`,
+no total/envelope; order `startedAt DESC, id DESC` with the id
+tie-break for equal timestamps)
+- DTO: `PolicyCheckHistoryResponse` with exactly id, trigger,
+attemptNumber, status, failureKind (null unless FAILED), httpStatus,
+bytesFetched, durationMs, startedAt, completedAt, and verbatim
+errorMessage (null unless FAILED); scalar-only mapping, lazy
+`policy` never touched (no N+1); `next_check_at` omitted (not
+attempt history); no entities exposed
+- Ownership/errors: repository-level policy+owner filtering;
+foreign/unknown → empty page (14-B listing convention, no oracle);
+malformed UUID → 400; bad JWT → 401 (principal before pagination
+validation); archived owned policies stay readable (status gates
+execution only)
+- Attempt semantics verbatim: all five statuses, both failure kinds,
+uncollapsed retry rows (`attemptNumber > 1`), stale-recovery rows
+as ordinary `FAILED`/`TRANSIENT`, live rows readable; no lifecycle
+change
+- Rate limit: existing per-user `api` tier (no filter change, no new
+tier); audit: none (read-only per ADR-022 §3; V23 stays the head,
+nothing reserved)
+- Repository/index: one derived `Pageable` overload with
+caller-supplied Sort (13-B pattern); no new migration, no new index
+— V9 `idx_attempt_policy_started` already serves the pattern
+- Boundaries: small read-only `PolicyCheckHistoryReadService`
+(14-B pattern); trigger-path `PolicyCheckService` not reused;
+scheduler/retry/fan-out/claim paths untouched
+- `./mvnw.cmd clean test`: not re-run (docs/decision-only slice;
+no Java, resource, migration, or test change); suite state
+unchanged at 1276 passing, 0 failures, 0 errors
+- Phase 16-C/1 (decision only) is now complete. Repository
+overload, read service, DTO, and endpoint belong to the following
+implementation slice and are NOT IMPLEMENTED.
 Wait for explicit instruction before beginning new work.
