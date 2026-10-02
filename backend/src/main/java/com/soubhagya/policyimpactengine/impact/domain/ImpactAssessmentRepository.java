@@ -91,4 +91,20 @@ public interface ImpactAssessmentRepository extends JpaRepository<ImpactAssessme
 	 * single-row query for the impact summary.
 	 */
 	Optional<ImpactAssessment> findFirstByUser_IdOrderByCreatedAtDescIdDesc(UUID userId);
+
+	/**
+	 * Phase 17-A — newest assessment for one policy scoped to its
+	 * authenticated owner (see DECISIONS.md ADR-036), in the existing
+	 * 14-B/4 newest-first order. Both conjuncts are load-bearing:
+	 * {@code ImpactAssessment} has no policy column of its own (the link
+	 * runs through {@code newVersion.policy}) and no owner-independent
+	 * notion of "the" assessment, so a user-only filter would pull in
+	 * another policy's assessment and a policy-only filter would expose
+	 * another user's personalized score. No such query existed before the
+	 * policy-overview projection, which reads only the row's own scalars
+	 * and therefore never initializes {@code newVersion},
+	 * {@code previousVersion}, or {@code user}.
+	 */
+	Optional<ImpactAssessment> findFirstByUser_IdAndNewVersion_Policy_IdOrderByCreatedAtDescIdDesc(
+			UUID userId, UUID policyId);
 }

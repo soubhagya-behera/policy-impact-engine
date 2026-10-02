@@ -55,6 +55,19 @@ public interface PolicyFetchAttemptRepository extends JpaRepository<PolicyFetchA
 	Optional<PolicyFetchAttempt> findFirstByPolicy_IdOrderByStartedAtDesc(UUID policyId);
 
 	/**
+	 * Phase 17-A — deterministic latest attempt for one policy (see
+	 * DECISIONS.md ADR-036). Identical to
+	 * {@link #findFirstByPolicy_IdOrderByStartedAtDesc} except for the
+	 * mandatory id tie-break: rapid successive claims can share a
+	 * {@code startedAt} instant, and a single-resource "latest check"
+	 * projection must return the same row every time, or one GET could
+	 * answer differently for identical data. Backed by V9
+	 * {@code idx_attempt_policy_started} plus a sort-level id
+	 * comparison; no index and no migration is required.
+	 */
+	Optional<PolicyFetchAttempt> findFirstByPolicy_IdOrderByStartedAtDescIdDesc(UUID policyId);
+
+	/**
 	 * Phase 2U atomic claim: promotes exactly one {@code PENDING} attempt to
 	 * {@code IN_PROGRESS}, stamping the claim time as the observation start.
 	 * The persistence context is cleared so callers re-read the freshly

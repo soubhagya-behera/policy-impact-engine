@@ -1801,4 +1801,91 @@ loads (Hibernate statistics assertion)
 new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
 all 23 migrations in Testcontainers; audit verification VALID)
 - Phase 16-C is now complete.
+
+Phase 17-A slice implemented and tested successfully
+(policy overview read surface; see DECISIONS.md ADR-036, added
+in this slice — ADR-035 and every earlier ADR unchanged; no
+migration):
+- ADR-036 defines the binding contract: endpoint purpose, exact
+  response fields, ownership/404, archived readability, the three
+  latest-fact rules, null semantics, read-only/no-audit posture,
+  a four-query performance ceiling, and an explicit
+  no-migration/no-index finding
+- Endpoint: authenticated `GET /api/v1/policies/{policyId}/overview`
+— one JSON object, no envelope, no array, **no pagination**; identity
+exclusively from `AuthenticatedUsers.requireUserId`; no request body;
+no `SecurityConfig` opening (authenticated by default)
+- DTO: new `PolicyOverviewResponse` with exactly `policyId`, `name`,
+`url`, `status`, `createdAt`, `updatedAt`, `nextCheckAt` (verbatim
+persisted value, never calculated/advanced) plus three nested blocks:
+`latestVersion{versionNumber,contentHash,observedAt}`,
+`latestCheck{id,trigger,attemptNumber,status,failureKind,httpStatus,
+bytesFetched,durationMs,startedAt,completedAt}`,
+`latestImpact{aggregateScore,band,assessedAt}`. No JPA entity,
+projection interface, or association exposed; `errorMessage`,
+`normalized_content`, breakdowns, recommendations, notifications,
+tokens, secrets, and audit hashes deliberately excluded
+- Ownership: single-resource convention — owned → `200`; unknown or
+foreign → `404 Resource not found` (existing `NoSuchElementException`
+mapping, never 403); malformed UUID → existing 400; missing/invalid
+JWT → existing 401. Deliberately differs from the sibling
+checks/versions/changes listings (empty page): a single resource has
+nothing to list, and 404-vs-200 is exactly what separates "not yours"
+from "no history yet"
+- Latest-version selection: highest persisted `versionNumber`
+(existing `findTopByPolicy_IdOrderByVersionNumberDesc`); ownership
+already proven by the 404 gate, so the lookup is not re-scoped
+- Latest-check selection: newest `PolicyFetchAttempt` under
+`startedAt DESC, id DESC`; the mandatory id tie-break is why a
+dedicated derived lookup was added instead of reusing
+`findFirstByPolicy_IdOrderByStartedAtDesc` (equal `startedAt`
+instants would otherwise make "latest" non-deterministic)
+- Latest-impact selection: newest `ImpactAssessment` for this policy
+**and** the authenticated owner under `createdAt DESC, id DESC`,
+traversed through `newVersion.policy`; both conjuncts are load-bearing
+(user-only would leak another policy's assessment, policy-only would
+leak another user's score). No such query existed, so one derived
+single-row lookup was added
+- Null semantics: a registered-but-never-checked policy returns 200
+with all three blocks null — never a zero score, empty band, epoch
+timestamp, or fabricated `NONE` band. `failureKind` non-null only on
+FAILED; `durationMs`/`completedAt` null on live PENDING/IN_PROGRESS
+rows. Nothing is recomputed and no assessment is created by a read
+- Archived behavior: owned ARCHIVED → 200 reporting `ARCHIVED`, with
+historical latest version/check/impact still visible and the frozen
+pre-archive `nextCheckAt` reported verbatim. Reading never
+reactivates, fetches, creates an attempt/assessment/recommendation/
+notification, or writes `nextCheckAt`; archive/reactivation code
+untouched
+- Read service: new read-only `PolicyOverviewReadService` (explicit
+userId, no `SecurityContext`, `@Transactional(readOnly = true)`,
+in-transaction scalar mapping, lazy associations never touched),
+following the PolicyVersionReadService / PolicyChangeReadService /
+ImpactSummaryReadService / PolicyCheckHistoryReadService pattern;
+`PolicyService`, `PolicyCheckService`, assessment creation, and
+recommendation paths neither reused nor modified
+- Read-only proof: policy, version, attempt, assessment, and audit
+counts identical across reads; `nextCheckAt` byte-identical; no
+observation/fetch/scheduler/fan-out invoked
+- Performance proof: exactly **4 queries per request** — owner-scoped
+policy, latest version, latest check, latest impact — pinned by
+assertion. Identical count for a fresh policy and for one with 40
+versions + 40 attempts + 39 assessments, with exactly 1 entity load
+for each of Policy/PolicyVersion/PolicyFetchAttempt/ImpactAssessment
+(no N+1) and no history join/fetch/count
+- Rate limit: existing per-user `api` tier (1 registration + 3 reads →
+4th read 429 + `Retry-After` + locked problem+json shape; anonymous →
+anonymous tier → 401). No filter/service/tier/budget change
+- Audit: none — no event, no `AuditEventType` value, no migration;
+`AuditVerificationService` remains VALID
+- Migration status: **none added, none needed.** No new index either:
+V9 `idx_attempt_policy_started`, `uq_policy_version_policy_number`,
+and the existing assessment indexes already serve the three
+latest-fact patterns, and no EXPLAIN evidence of insufficiency exists
+- No `EntityGraph`, no EAGER promotion, no fetch-join graph, no new
+persistence model, no speculative index
+- `./mvnw.cmd clean test`: **1305 tests passing** (1289 pre-17-A + 16
+new), 0 failures, 0 errors, BUILD SUCCESS; Flyway validates/applies
+all 23 migrations in Testcontainers
+- Phase 17-A is now complete.
 Wait for explicit instruction before beginning new work.

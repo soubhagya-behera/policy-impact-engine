@@ -66,6 +66,9 @@ class PolicyCheckHistoryControllerTest {
 	private PolicyCheckHistoryReadService checkHistory;
 
 	@MockitoBean
+	private com.soubhagya.policyimpactengine.policy.application.PolicyOverviewReadService overviewService;
+
+	@MockitoBean
 	private com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService versions;
 
 	@MockitoBean

@@ -23,12 +23,14 @@ import com.soubhagya.policyimpactengine.policy.application.PolicyService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyArchiveService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyCheckHistoryReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyCheckService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyOverviewReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyReactivationService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyChangeReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService;
 import com.soubhagya.policyimpactengine.policy.web.dto.ChangeRecordResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyCheckHistoryResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyCheckResponse;
+import com.soubhagya.policyimpactengine.policy.web.dto.PolicyOverviewResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.VersionDiffResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.CreatePolicyRequest;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyResponse;
@@ -58,6 +60,10 @@ import jakarta.validation.Valid;
  * <p>Phase 11C emits {@code POLICY_REGISTERED} after the policy
  * row commits. Reads, observations, and failed registrations never
  * reach the emit line. No policy URL or content enters metadata.
+ *
+ * <p>Phase 17-A adds the read-only owner-scoped current-state
+ * overview (see DECISIONS.md ADR-036), which emits nothing and stays
+ * silent on every code path.
  */
 @RestController
 @RequestMapping("/api/v1/policies")
@@ -68,17 +74,19 @@ public class PolicyController {
 	private final PolicyReactivationService reactivation;
 	private final PolicyCheckService check;
 	private final PolicyCheckHistoryReadService checkHistory;
+	private final PolicyOverviewReadService overviewService;
 	private final PolicyVersionReadService versions;
 	private final PolicyChangeReadService changes;
 	private final AuditService auditService;
 
 	public PolicyController(PolicyService service, PolicyArchiveService archive,
 			PolicyReactivationService reactivation, PolicyCheckService check,
-			PolicyCheckHistoryReadService checkHistory, PolicyVersionReadService versions,
-			PolicyChangeReadService changes, AuditService auditService) {
+			PolicyCheckHistoryReadService checkHistory, PolicyOverviewReadService overviewService,
+			PolicyVersionReadService versions, PolicyChangeReadService changes,
+			AuditService auditService) {
 		if (service == null || archive == null || reactivation == null || check == null
-				|| checkHistory == null || versions == null || changes == null
-				|| auditService == null) {
+				|| checkHistory == null || overviewService == null || versions == null
+				|| changes == null || auditService == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.service = service;
@@ -86,6 +94,7 @@ public class PolicyController {
 		this.reactivation = reactivation;
 		this.check = check;
 		this.checkHistory = checkHistory;
+		this.overviewService = overviewService;
 		this.versions = versions;
 		this.changes = changes;
 		this.auditService = auditService;
@@ -170,6 +179,24 @@ public class PolicyController {
 			@PathVariable UUID policyId) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
 		return check.check(userId, policyId);
+	}
+
+	/**
+	 * Phase 17-A — owner-scoped current-state overview (ADR-036): one
+	 * compact object with the policy row (including the verbatim
+	 * `nextCheckAt`) plus the newest persisted version, check attempt
+	 * (`startedAt DESC, id DESC`), and owner-scoped assessment, each
+	 * `null` when that row does not exist. Identity still comes only from
+	 * the principal. A foreign or unknown policy behaves as not-found
+	 * (the single-resource 404 convention), an archived owned policy
+	 * stays fully readable, and the read is strictly silent: no
+	 * observation, scheduling, fan-out, or audit activity.
+	 */
+	@GetMapping("/{policyId}/overview")
+	public PolicyOverviewResponse overview(Authentication authentication,
+			@PathVariable UUID policyId) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		return overviewService.get(userId, policyId);
 	}
 
 	/**
