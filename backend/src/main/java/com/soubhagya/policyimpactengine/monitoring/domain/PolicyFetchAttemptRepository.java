@@ -35,6 +35,18 @@ public interface PolicyFetchAttemptRepository extends JpaRepository<PolicyFetchA
 	List<PolicyFetchAttempt> findByPolicy_IdOrderByStartedAtDesc(UUID policyId);
 
 	/**
+	 * Phase 16-C — owner-scoped paged attempt history (see DECISIONS.md
+	 * ADR-035). No ordering is embedded in the name: the caller supplies
+	 * the exact deterministic Sort (startedAt DESC, id DESC) through the
+	 * Pageable, so the ordering lives in exactly one place — the read
+	 * service. Returns a bare list (limit/offset only, no count query).
+	 * Ownership filters at the repository level through
+	 * {@code attempt.policy.owner}; foreign rows never load.
+	 */
+	List<PolicyFetchAttempt> findByPolicy_IdAndPolicy_Owner_Id(UUID policyId, UUID ownerId,
+			Pageable pageable);
+
+	/**
 	 * Returns the newest recorded attempt for the given policy, if any.
 	 * Phase 2U.1 derives the retry chain position from this row: a
 	 * {@code FAILED}/{@code TRANSIENT} row continues the chain, anything

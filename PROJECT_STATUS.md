@@ -1765,4 +1765,40 @@ unchanged at 1276 passing, 0 failures, 0 errors
 - Phase 16-C/1 (decision only) is now complete. Repository
 overload, read service, DTO, and endpoint belong to the following
 implementation slice and are NOT IMPLEMENTED.
+
+Phase 16-C slice implemented and tested successfully
+(policy check history; see DECISIONS.md ADR-035 —
+ADR-035 unchanged, no new ADR, no migration):
+- Repository: one derived `Pageable` overload
+`findByPolicy_IdAndPolicy_Owner_Id` (caller Sort carries
+`startedAt DESC, id DESC`; bare list, no count); V9
+`idx_attempt_policy_started` serves the pattern — no new
+index, no migration (V23 stays the head)
+- Read service: new read-only `PolicyCheckHistoryReadService`
+(explicit userId, no `SecurityContext`, in-transaction scalar DTO
+mapping, lazy `policy` never touched); trigger-path
+`PolicyCheckService` not reused; no observation/scheduler/fan-out/
+audit activity
+- DTO: new `PolicyCheckHistoryResponse` with exactly id, trigger,
+attemptNumber, status, failureKind (null unless FAILED), httpStatus,
+bytesFetched, durationMs/completedAt (null while live), verbatim
+errorMessage (null unless FAILED), startedAt; no entities, no
+`next_check_at`, no credentials
+- Endpoint: authenticated `GET /api/v1/policies/{policyId}/checks`
+(principal before pagination validation; bare array, page 0/size 20/
+max 100, 400s never clamped, `200 []`; foreign/unknown → empty
+page; archived stays readable; authenticated by default, no
+`SecurityConfig` opening)
+- Attempt semantics verbatim: all five statuses, both failure
+kinds, uncollapsed retries, stale rows as ordinary
+`FAILED`/`TRANSIENT`, live rows visible; no lifecycle change
+- Rate limit: existing per-user `api` tier (no filter/service
+change; anonymous → anonymous tier → 401; locked 429 +
+`Retry-After`); audit: none (read-only; V23 unchanged)
+- N+1 proof: history page of 5 costs exactly 1 query with 0 Policy
+loads (Hibernate statistics assertion)
+- `./mvnw.cmd clean test`: 1289 tests passing (1276 pre-16-C + 13
+new), 0 failures, 0 errors, BUILD SUCCESS (Flyway validates/applies
+all 23 migrations in Testcontainers; audit verification VALID)
+- Phase 16-C is now complete.
 Wait for explicit instruction before beginning new work.

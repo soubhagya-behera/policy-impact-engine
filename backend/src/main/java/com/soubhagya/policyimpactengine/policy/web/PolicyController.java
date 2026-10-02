@@ -21,11 +21,13 @@ import com.soubhagya.policyimpactengine.audit.domain.AuditMetadata;
 import com.soubhagya.policyimpactengine.common.pagination.FeedPagination;
 import com.soubhagya.policyimpactengine.policy.application.PolicyService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyArchiveService;
+import com.soubhagya.policyimpactengine.policy.application.PolicyCheckHistoryReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyCheckService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyReactivationService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyChangeReadService;
 import com.soubhagya.policyimpactengine.policy.application.PolicyVersionReadService;
 import com.soubhagya.policyimpactengine.policy.web.dto.ChangeRecordResponse;
+import com.soubhagya.policyimpactengine.policy.web.dto.PolicyCheckHistoryResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.PolicyCheckResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.VersionDiffResponse;
 import com.soubhagya.policyimpactengine.policy.web.dto.CreatePolicyRequest;
@@ -65,22 +67,25 @@ public class PolicyController {
 	private final PolicyArchiveService archive;
 	private final PolicyReactivationService reactivation;
 	private final PolicyCheckService check;
+	private final PolicyCheckHistoryReadService checkHistory;
 	private final PolicyVersionReadService versions;
 	private final PolicyChangeReadService changes;
 	private final AuditService auditService;
 
 	public PolicyController(PolicyService service, PolicyArchiveService archive,
 			PolicyReactivationService reactivation, PolicyCheckService check,
-			PolicyVersionReadService versions,
+			PolicyCheckHistoryReadService checkHistory, PolicyVersionReadService versions,
 			PolicyChangeReadService changes, AuditService auditService) {
 		if (service == null || archive == null || reactivation == null || check == null
-				|| versions == null || changes == null || auditService == null) {
+				|| checkHistory == null || versions == null || changes == null
+				|| auditService == null) {
 			throw new IllegalArgumentException("Dependencies must not be null");
 		}
 		this.service = service;
 		this.archive = archive;
 		this.reactivation = reactivation;
 		this.check = check;
+		this.checkHistory = checkHistory;
 		this.versions = versions;
 		this.changes = changes;
 		this.auditService = auditService;
@@ -165,6 +170,27 @@ public class PolicyController {
 			@PathVariable UUID policyId) {
 		UUID userId = AuthenticatedUsers.requireUserId(authentication);
 		return check.check(userId, policyId);
+	}
+
+	/**
+	 * Phase 16-C — paginated owner-scoped check history (ADR-035):
+	 * bare JSON array of persisted attempt rows, newest first
+	 * ({@code startedAt} descending, row id tie-break), windowed by
+	 * {@code page}/{@code size} (defaults 0/20, maximum 100). Identity
+	 * still comes only from the principal; the principal is resolved
+	 * before pagination is validated so unauthenticated callers stay
+	 * 401. A foreign or unknown policy yields an empty page, and an
+	 * archived owned policy stays fully readable. Strictly read-only:
+	 * no observation, scheduling, fan-out, or audit activity.
+	 */
+	@GetMapping("/{policyId}/checks")
+	public List<PolicyCheckHistoryResponse> listChecks(Authentication authentication,
+			@PathVariable UUID policyId,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int size) {
+		UUID userId = AuthenticatedUsers.requireUserId(authentication);
+		FeedPagination pagination = FeedPagination.of(page, size);
+		return checkHistory.list(userId, policyId, pagination.page(), pagination.size());
 	}
 
 	/**
