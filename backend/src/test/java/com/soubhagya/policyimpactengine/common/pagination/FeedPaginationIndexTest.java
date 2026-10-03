@@ -40,17 +40,17 @@ class FeedPaginationIndexTest {
 	}
 
 	@Test
-	void schemaVersionIsExactlyV23() {
+	void schemaVersionIsExactlyV24() {
 		Integer applied = jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM flyway_schema_history WHERE success = true",
 				Integer.class);
-		assertThat(applied).isEqualTo(23);
+		assertThat(applied).isEqualTo(24);
 
 		String latest = jdbcTemplate.queryForObject(
 				"SELECT version FROM flyway_schema_history WHERE success = true"
 						+ " ORDER BY installed_rank DESC LIMIT 1",
 				String.class);
-		assertThat(latest).isEqualTo("23");
+		assertThat(latest).isEqualTo("24");
 	}
 
 	private String indexDefinition(String indexName) {

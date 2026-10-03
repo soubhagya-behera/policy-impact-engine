@@ -67,10 +67,10 @@ class AuditEventCatalogV21Test {
 	}
 
 	@Test
-	void v1ToV23ValidationRemainsClean() {
+	void v1ToV24ValidationRemainsClean() {
 		Integer applied = jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM flyway_schema_history WHERE success=true", Integer.class);
-		assertThat(applied).isEqualTo(23);
+		assertThat(applied).isEqualTo(24);
 		Integer failed = jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM flyway_schema_history WHERE success=false", Integer.class);
 		assertThat(failed).isZero();
