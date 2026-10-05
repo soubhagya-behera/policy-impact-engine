@@ -16,9 +16,12 @@ with generic design assumptions.
 
 ## Stack
 
-- React + Vite + **JavaScript**
+- React
+- Vite
+- TypeScript
 - Tailwind CSS
-- **TypeScript is NOT to be introduced.**
+
+TypeScript IS approved and REQUIRED for the frontend.
 
 ## Frontend design rule
 
