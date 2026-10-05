@@ -35,6 +35,7 @@ The database name `policypulse` is retained intentionally. No rename is planned 
 - `application-example.properties` established as the GitHub-safe configuration template
 - Clean Maven tests passing
 - Spring Boot application startup verified against PostgreSQL
+- `auth_refresh_token` hash columns realigned to the JPA mapping (Flyway V24: `char(64)` → `varchar(64)` on `token_hash` and `replaced_by_token_hash`) so Hibernate `validate` passes against a Flyway-migrated database; no applied migration edited, no entity mapping weakened
 - Architecture designed and approved (see ARCHITECTURE.md and DECISIONS.md)
 
 ## Current Phase
