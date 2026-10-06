@@ -111,6 +111,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
 				&& "/api/v1/auth/logout".equals(path)) {
 			return rateLimitService.refreshAttempt(clientIp);
 		}
+		// Phase 18-B — Google handoff shares the existing auth-login tier
+		// (see DECISIONS.md ADR-037): same anonymous IP-keyed 10/min
+		// budget as login, no new limiter mechanism. The start redirect
+		// and the Spring /oauth2/* + /login/oauth2/* callback ride the
+		// anonymous tier below into their downstream handling, so no
+		// Google authentication path is unrestricted.
+		if (("GET".equalsIgnoreCase(method) || "POST".equalsIgnoreCase(method))
+				&& ("/api/v1/auth/google/start".equals(path)
+						|| "/api/v1/auth/google/complete".equals(path))) {
+			return rateLimitService.loginAttempt(clientIp);
+		}
 		UUID userId = trustedUserId();
 		if ("POST".equalsIgnoreCase(method)
 				&& path.startsWith("/api/v1/me/impact-assessments/")

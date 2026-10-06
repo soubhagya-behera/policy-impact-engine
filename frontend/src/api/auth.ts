@@ -1,4 +1,4 @@
-import { apiRequest, rawRequest } from './client'
+import { API_BASE_URL, apiRequest, rawRequest } from './client'
 import type {
   LoginRequest,
   LogoutRequest,
@@ -61,4 +61,30 @@ export function logout(request: LogoutRequest): Promise<void> {
 /** `POST /api/v1/auth/logout-all` -> 204. Revokes every live session. */
 export function logoutAll(): Promise<void> {
   return apiRequest<undefined>('/api/v1/auth/logout-all', { method: 'POST' })
+}
+
+/**
+ * Backend entry point for Google sign-in.
+ *
+ * Reached by top-level browser navigation (never fetch/XHR), so Spring's
+ * OAuth2 state cookie survives the Google redirect. Same-origin in dev
+ * (the Vite proxy forwards `/api`), absolute via `VITE_API_BASE_URL` in
+ * production.
+ */
+export function googleStartUrl(): string {
+  return `${API_BASE_URL}/api/v1/auth/google/start`
+}
+
+/**
+ * `POST /api/v1/auth/google/complete` -> 200 with the standard token pair.
+ * Exchanges the short-lived single-use completion code the backend OAuth
+ * callback minted. Uses `rawRequest` so a 401/409 here is a Google-handoff
+ * failure, never a trigger for token refresh.
+ */
+export function completeGoogleSignIn(code: string): Promise<TokenResponse> {
+  return rawRequest<TokenResponse>('/api/v1/auth/google/complete', {
+    method: 'POST',
+    body: { code },
+    authenticated: false,
+  })
 }

@@ -3,6 +3,7 @@ import { AppShell } from '../components/layout/AppShell'
 import { ProtectedRoute } from '../auth/ProtectedRoute'
 import { ActivityPage } from '../pages/activity/ActivityPage'
 import { LoginPage } from '../pages/auth/LoginPage'
+import { GoogleCallbackPage } from '../pages/auth/GoogleCallbackPage'
 import { RegisterPage } from '../pages/auth/RegisterPage'
 import { DashboardPage } from '../pages/dashboard/DashboardPage'
 import { HomePage } from '../pages/HomePage'
@@ -27,6 +28,7 @@ export function AppRoutes() {
       <Route path={ROUTES.home} element={<HomePage />} />
       <Route path={ROUTES.login} element={<LoginPage />} />
       <Route path={ROUTES.register} element={<RegisterPage />} />
+      <Route path={ROUTES.googleCallback} element={<GoogleCallbackPage />} />
 
       {/* Authenticated application */}
       <Route

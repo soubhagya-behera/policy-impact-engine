@@ -25,7 +25,7 @@ function resolveRedirect(state: unknown): string {
 }
 
 export function LoginPage() {
-  const { signIn, status } = useAuth()
+  const { signIn, signInWithGoogle, status } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [email, setEmail] = useState('')
@@ -112,6 +112,15 @@ export function LoginPage() {
             isLoading={isSubmitting}
           >
             {isSubmitting ? 'Signing in…' : 'Sign in'}
+          </Button>
+
+          <Button
+            type="button"
+            variant="secondary"
+            fullWidth
+            onClick={signInWithGoogle}
+          >
+            Continue with Google
           </Button>
         </div>
       </form>

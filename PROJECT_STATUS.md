@@ -1890,3 +1890,97 @@ new), 0 failures, 0 errors, BUILD SUCCESS; Flyway validates/applies
 all 23 migrations in Testcontainers
 - Phase 17-A is now complete.
 Wait for explicit instruction before beginning new work.
+
+## Phase 18-B — Google Sign-In via OIDC (COMPLETE)
+
+Decision: DECISIONS.md ADR-037. Google OIDC resolves to the local
+`User(UUID)`; the application JWT (Nimbus HS256, `sub` = local UUID)
+stays the only API credential, with the existing refresh-token
+rotation/reuse detection, Bearer filter, logout/logout-all, and
+rate-limit machinery unchanged.
+
+- Dependency: only `spring-boot-starter-oauth2-client` added
+(`pom.xml`); OIDC validation (signature, issuer, audience, expiry,
+state) is Spring Security's. No `oauth2-resource-server`, no manual
+crypto, no Supabase Auth, no cookies for app auth, no Redis.
+- Config (`application-example.properties`, placeholders only, never
+real credentials): `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` env
+backing, backend callback redirect URI
+(`{baseUrl}/login/oauth2/code/{registrationId}`), exact
+`app.google.frontend-base-url` SPA origin, and
+`server.forward-headers-strategy=framework` for Render HTTPS.
+Production CORS stays deny-by-default plus the exact Vercel origin;
+`allowCredentials=false` unchanged.
+- Migrations: V25 `app_user.google_sub` nullable + partial unique
+index (`WHERE google_sub IS NOT NULL`); V26 `auth_google_completion`
+(digest-only, single-use, 10-minute absolute TTL, expiry CHECK,
+unique hash); V27 audit CHECK widened to twelve codes
+(`AUTH_GOOGLE_LOGIN_SUCCEEDED`). `auth_refresh_token` and
+email/password semantics untouched; `ddl-auto=validate` passes.
+- Identity policy (`AuthGoogleService`, no `SecurityContext` access):
+known subject → that user (verified-email change only when
+collision-free, else fail); unknown subject + unknown verified email
+→ Google-only user (`password_hash = NULL`, never password-login);
+unverified → reject with nothing created; unknown subject +
+existing local email → generic 409, nothing written, never merged.
+Race duplicates resolve through the same policy with the unique
+indexes as final guard. Refresh-issuance failure alone becomes the
+uniform identity failure (login atomicity mirrored).
+- Stateless preserved: `SessionCreationPolicy.STATELESS` unchanged;
+OAuth state lives in a short-lived `HttpOnly + SameSite=Lax` cookie
+(`CookieAuthorizationRequestRepository`, path `/` so both
+`/oauth2/authorization/*` and `/login/oauth2/code/*` receive it).
+OAuth2 login wiring applies only when a Google registration exists,
+so credential-less boot keeps the exact pre-Google chain.
+- Handoff: `GET /api/v1/auth/google/start` (anonymous 302 for
+top-level navigation) → Google → backend callback
+(`GoogleOAuthSuccessHandler`: resolve user, mint opaque completion
+code, redirect carrying only the code) → SPA
+`/auth/google/callback?code=…` → `POST /api/v1/auth/google/complete`
+(atomic single-use consume → exactly the existing `TokenResponse`
+shape + post-commit audit witness). Tokens never in URLs; codes,
+tokens, and secrets never logged or audited.
+- Rate limit: start + complete ride the existing anonymous IP-keyed
+auth-login tier (10/min); OAuth callback paths ride the anonymous
+tier. No new limiter.
+- Frontend: `signInWithGoogle()` (top-level navigation) +
+`completeGoogleSignIn(code)` in `api/auth.ts`; `AuthContext`
+extended (existing `applySession()` reused, no parallel store);
+`/auth/google/callback` page (single exchange → `/app` replace,
+generic 401/409/429/network messages); `Continue with Google`
+secondary button on Login/Register; dev proxy also forwards
+`/oauth2` and `/login/oauth2`. Session UX (proactive/single-flight
+refresh, 401 replay, expiry, logout, `ProtectedRoute`) unchanged.
+- Security fixes during implementation: success bridge no longer
+issues an orphan refresh row (resolve + code only); cookie path
+corrected to `/`; `google_sub` insert-only (`updatable=false`);
+ADR cross-references corrected to ADR-037.
+- Tests: `AuthGoogleServiceTest` (11 unit: provisioning, verified-
+email gate, no-merge, collision-safe email change, atomicity,
+races); `GoogleAuthControllerTest` (5 slice: 302 start, token shape
++ audit, 401/409/400); `GoogleSignInIntegrationTest` (9
+Testcontainers end-to-end: usable pair, single-use, expiry, logout,
+no password login, no merge, audit); `GoogleSchemaMigrationTest`
+(6: V25–V27, partial unique index, DB-level duplicate rejection,
+completion guards, audit CHECK);
+`GoogleCompleteRateLimitIntegrationTest` (2: shared auth tier +
+per-IP budgets); `AuditEventCatalogV27Test` (8: twelve-code
+lockstep). Convention bumps: V20–V23 catalog pins, `AuditEventTest`
+catalog, `FeedPaginationIndexTest`, `PolicyArchiveServiceIntegration`
+count, `RefreshTokenRepositoryTest` moved V24 → V27; V23 lockstep
+relaxed to subset (exact equality now lives in V27). Frontend:
+vitest (`npm test`, 7 tests: handoff request shape, no `Authorization`
+header, callback error mapping).
+- Docs: ADR-037; ARCHITECTURE.md (§27 Google bullet, §28 endpoint
+rows); DEVELOPMENT.md (local Google setup + production env);
+`application-example.properties` (Google section).
+- `./mvnw.cmd test` (offline): **1346 tests passing** (1305 pre-18-B
++ 41 new), 0 failures, 0 errors, BUILD SUCCESS; Flyway
+validates/applies all 27 migrations in Testcontainers. Frontend:
+`npm test` 7/7, `npm run lint` clean, `npm run build` clean.
+- Remaining manual work: Google Cloud Console OAuth client + both
+redirect URIs (local + Render backend); Render `GOOGLE_CLIENT_ID` /
+`GOOGLE_CLIENT_SECRET` env; Vercel origin in `app.cors` +
+`app.google.frontend-base-url`. No commit/push performed.
+- Phase 18-B is now complete.
+Wait for explicit instruction before beginning new work.

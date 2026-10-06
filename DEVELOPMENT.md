@@ -98,3 +98,38 @@ as a single replica (do not scale without a new ADR); Actuator health
 stays authenticated and the container HEALTHCHECK asserts that 401
 posture (see DECISIONS.md ADR-028).
 
+## Google Sign-In Local Setup (Phase 18-B)
+
+Google sign-in is opt-in and disabled by default: without Google
+credentials the backend boots and runs exactly as before (password
+auth only), because the OAuth2 login wiring applies only when a
+Google client registration exists (see DECISIONS.md ADR-037).
+
+To enable locally:
+
+1. Create OAuth client ID credentials (type: Web application) in the
+Google Cloud Console, with the authorized redirect URI
+`http://localhost:8080/login/oauth2/code/google` (the backend
+callback — never the frontend origin).
+2. Put the credentials only in the Git-ignored local
+`backend/src/main/resources/application.properties` (never commit
+them; `application-example.properties` holds placeholders only):
+`spring.security.oauth2.client.registration.google.client-id` and
+`...client-secret` (or the `GOOGLE_CLIENT_ID` /
+`GOOGLE_CLIENT_SECRET` environment variables).
+3. Keep `app.google.frontend-base-url=http://localhost:5173` (the
+default). Run the backend (`:8080`) and the Vite dev server
+(`:5173`); the dev proxy forwards `/api`, `/oauth2`, and
+`/login/oauth2` so the top-level OAuth navigation stays
+same-origin.
+
+Rules: never commit real credentials; never put access, refresh, ID,
+or completion-code values in URLs, logs, or audit metadata; never
+merge accounts on email-string equality (anonymous collisions return
+the generic 409); password reset stays future work. Production needs
+the Render backend callback URI registered in Google Cloud, the exact
+Vercel origin in `app.cors.allowed-origins` and
+`app.google.frontend-base-url`, `server.forward-headers-strategy=framework`
+behind the TLS proxy, and `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+as Render environment variables.
+

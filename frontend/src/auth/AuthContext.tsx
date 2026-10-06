@@ -50,6 +50,18 @@ export interface AuthContextValue {
   isAuthenticated: boolean
   signIn(email: string, password: string): Promise<void>
   signUp(email: string, password: string): Promise<{ email: string }>
+  /**
+   * Starts Google sign-in with a top-level navigation to the backend
+   * OAuth entry point (never fetch/XHR, so the OAuth state cookie
+   * survives the Google redirect).
+   */
+  signInWithGoogle(): void
+  /**
+   * Completes Google sign-in by exchanging the one-time completion code
+   * for the standard token pair, then applying it as the session.
+   * The code is opaque and single-use; no Google token is ever stored.
+   */
+  completeGoogleSignIn(code: string): Promise<void>
   signOut(): Promise<void>
   /** Revokes every live session for this account on the backend. */
   signOutEverywhere(): Promise<void>
@@ -210,6 +222,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { email: response.email }
   }, [])
 
+  const signInWithGoogle = useCallback(() => {
+    // Top-level navigation, not fetch: the OAuth flow leaves this page
+    // for Google and returns through the backend callback.
+    window.location.assign(authApi.googleStartUrl())
+  }, [])
+
+  const completeGoogleSignIn = useCallback(
+    async (code: string) => {
+      const response = await authApi.completeGoogleSignIn(code)
+      // The completion response carries no email (it is the standard
+      // token pair), so keep any previously stored address for the
+      // greeting; the session itself depends only on the tokens.
+      const userEmail = readStoredEmail() ?? ''
+      applySession(
+        {
+          accessToken: response.accessToken,
+          refreshToken: response.refreshToken,
+          accessExpiresAt: expiryFrom(response),
+        },
+        userEmail,
+      )
+    },
+    [applySession],
+  )
+
   const signOut = useCallback(async () => {
     const stored = readRefreshToken()
     // Clear locally even if the network call fails, so the shell can never get
@@ -245,6 +282,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: session !== null,
       signIn,
       signUp,
+      signInWithGoogle,
+      completeGoogleSignIn,
       signOut,
       signOutEverywhere,
     }),
@@ -254,6 +293,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       signIn,
       signUp,
+      signInWithGoogle,
+      completeGoogleSignIn,
       signOut,
       signOutEverywhere,
     ],

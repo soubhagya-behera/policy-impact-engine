@@ -12,7 +12,7 @@ import { ROUTES } from '../../app/routes'
 const MIN_PASSWORD_LENGTH = 8
 
 export function RegisterPage() {
-  const { signUp, signIn, status } = useAuth()
+  const { signUp, signIn, signInWithGoogle, status } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -113,6 +113,15 @@ export function RegisterPage() {
 
           <Button type="submit" fullWidth isLoading={isSubmitting}>
             {isSubmitting ? 'Creating account…' : 'Create account'}
+          </Button>
+
+          <Button
+            type="button"
+            variant="secondary"
+            fullWidth
+            onClick={signInWithGoogle}
+          >
+            Continue with Google
           </Button>
         </div>
       </form>

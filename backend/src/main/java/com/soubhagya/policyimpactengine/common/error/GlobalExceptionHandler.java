@@ -48,9 +48,20 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	}
 
 	@ExceptionHandler({ InvalidCredentialsException.class, AuthenticationRequiredException.class,
-			InvalidRefreshTokenException.class })
+			InvalidRefreshTokenException.class,
+			com.soubhagya.policyimpactengine.user.InvalidGoogleIdentityException.class })
 	public ProblemDetail handleUnauthenticated(RuntimeException ex) {
 		return problem(HttpStatus.UNAUTHORIZED, "Unauthenticated", ex.getMessage());
+	}
+
+	/**
+	 * Phase 18-B — anonymous Google login colliding with an existing local
+	 * email (see DECISIONS.md ADR-037). Generic conflict with no oracle:
+	 * nothing is merged and no subject is written.
+	 */
+	@ExceptionHandler(com.soubhagya.policyimpactengine.user.GoogleLinkRequiredException.class)
+	public ProblemDetail handleGoogleLinkRequired(RuntimeException ex) {
+		return problem(HttpStatus.CONFLICT, "Already registered", ex.getMessage());
 	}
 
 	/**

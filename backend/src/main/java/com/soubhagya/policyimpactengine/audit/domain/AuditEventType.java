@@ -4,13 +4,14 @@ package com.soubhagya.policyimpactengine.audit.domain;
  * Phase 11A — frozen first-wave audit event catalog (see DECISIONS.md
  * ADR-023 §12).
  *
- * <p>Exactly these eleven codes may be persisted; the {@code event_type}
+ * <p>Exactly these twelve codes may be persisted; the {@code event_type}
  * CHECK in V17 (widened by V20, see DECISIONS.md ADR-030, then by V21,
  * see DECISIONS.md ADR-031, then by V22, see DECISIONS.md ADR-032,
- * then by V23, see DECISIONS.md ADR-033) enforces the same set in the
- * database. No login failure, read, observation, version, assessment,
- * recommendation, or notification codes exist yet — later slices add
- * codes only with an explicit decision. Persisted as the enum name.
+ * then by V23, see DECISIONS.md ADR-033, then by V27, see DECISIONS.md
+ * ADR-037) enforces the same set in the database. No login failure, read,
+ * observation, version, assessment, recommendation, or notification codes
+ * exist yet — later slices add codes only with an explicit decision.
+ * Persisted as the enum name.
  */
 public enum AuditEventType {
 	AUTH_USER_REGISTERED,
@@ -54,6 +55,13 @@ public enum AuditEventType {
 	 * state emit nothing.
 	 */
 	AUTH_REFRESH_REUSE_DETECTED,
+	/**
+	 * Phase 18-B — Google login witness (see DECISIONS.md ADR-037):
+	 * emitted post-commit best-effort when a validated Google identity
+	 * yields our application token pair (actor = local user, resource =
+	 * {@code USER}/user id, empty metadata). Failures stay silent.
+	 */
+	AUTH_GOOGLE_LOGIN_SUCCEEDED,
 	/**
 	 * Phase 16-A/2 — reactivation witness (see DECISIONS.md ADR-033):
 	 * emitted post-commit best-effort only when an owned archived
