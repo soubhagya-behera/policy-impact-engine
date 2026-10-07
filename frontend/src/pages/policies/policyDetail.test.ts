@@ -3,9 +3,11 @@ import { ApiError, NetworkError } from '../../api/errors'
 import {
   checkNowEnabled,
   checkOutcomeLabel,
+  latestAdjacentPair,
   lifecycleAction,
   sortVersionsNewestFirst,
   toLifecycleError,
+  validateDiffPair,
 } from './PolicyDetailPage'
 
 /**
@@ -139,5 +141,52 @@ describe('sortVersionsNewestFirst', () => {
     const input = [version(1), version(2)]
     sortVersionsNewestFirst(input)
     expect(input.map((entry) => entry.versionNumber)).toEqual([1, 2])
+  })
+})
+
+describe('latestAdjacentPair', () => {
+  function version(versionNumber: number) {
+    return {
+      id: `version-${versionNumber}`,
+      policyId: 'policy-1',
+      versionNumber,
+      contentHash: `hash-${versionNumber}`,
+      observedAt: '2026-10-07T10:00:00Z',
+    }
+  }
+
+  it('returns null until two versions exist', () => {
+    expect(latestAdjacentPair([])).toBeNull()
+    expect(latestAdjacentPair([version(1)])).toBeNull()
+  })
+
+  it('defaults to the two newest version numbers', () => {
+    expect(
+      latestAdjacentPair([version(1), version(2), version(3)]),
+    ).toEqual({ from: 2, to: 3 })
+  })
+
+  it('tolerates unordered input', () => {
+    expect(
+      latestAdjacentPair([version(3), version(1), version(2)]),
+    ).toEqual({ from: 2, to: 3 })
+  })
+})
+
+describe('validateDiffPair', () => {
+  it('requires both selections', () => {
+    expect(validateDiffPair(null, 2)).toBe('Select two versions to compare.')
+    expect(validateDiffPair(1, null)).toBe('Select two versions to compare.')
+  })
+
+  it('accepts adjacent pairs', () => {
+    expect(validateDiffPair(1, 2)).toBeNull()
+    expect(validateDiffPair(4, 5)).toBeNull()
+  })
+
+  it('rejects same, gapped, and reversed pairs', () => {
+    expect(validateDiffPair(2, 2)).toContain('adjacent')
+    expect(validateDiffPair(1, 3)).toContain('adjacent')
+    expect(validateDiffPair(3, 2)).toContain('adjacent')
   })
 })

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { archivePolicy, getPolicyOverview, listPolicyChanges, listPolicyChecks, listPolicyVersions, reactivatePolicy, runPolicyCheck } from '../../api/policies'
+import { archivePolicy, getPolicyOverview, getVersionDiff, listPolicyChanges, listPolicyChecks, listPolicyVersions, reactivatePolicy, runPolicyCheck } from '../../api/policies'
 import { isApiError, toErrorMessage } from '../../api/errors'
 import {
   EmptyState,
@@ -22,7 +22,7 @@ import {
   statusLabel,
 } from '../../lib/format'
 import { ROUTES } from '../../app/routes'
-import type { PolicyChangeRecord, PolicyCheckHistoryEntry, PolicyCheckResult, PolicyOverview, PolicyStatus, PolicyVersionSummary } from '../../api/types'
+import type { PolicyChangeRecord, PolicyCheckHistoryEntry, PolicyCheckResult, PolicyOverview, PolicyStatus, PolicyVersionDiff, PolicyVersionSummary } from '../../api/types'
 
 /**
  * Lifecycle action available for a policy status.
@@ -95,6 +95,40 @@ export function sortVersionsNewestFirst(
 }
 
 /**
+ * Default diff selection: the two newest distinct version numbers.
+ * Returns null until at least two versions exist.
+ */
+export function latestAdjacentPair(
+  versions: PolicyVersionSummary[],
+): { from: number; to: number } | null {
+  const numbers = [...new Set(versions.map((version) => version.versionNumber))].sort(
+    (a, b) => b - a,
+  )
+  const [to, from] = numbers
+  if (to === undefined || from === undefined) return null
+  return { from, to }
+}
+
+/**
+ * Validates a user-selected diff pair against the backend's
+ * adjacent-only rule (`to` must equal `from + 1`). Returns null when
+ * the pair may be requested, otherwise the message to show instead
+ * of firing a request that is guaranteed to answer `400`.
+ */
+export function validateDiffPair(
+  from: number | null,
+  to: number | null,
+): string | null {
+  if (from === null || to === null) {
+    return 'Select two versions to compare.'
+  }
+  if (to !== from + 1) {
+    return 'Only adjacent versions can be compared, for example v2 and v3.'
+  }
+  return null
+}
+
+/**
  * Policy detail foundation.
  *
  * Phase 18-A establishes the shell and surfaces the real overview from
@@ -108,6 +142,11 @@ export function PolicyDetailPage() {
   const [isChecking, setIsChecking] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [checkResult, setCheckResult] = useState<PolicyCheckResult | null>(null)
+  const [fromVersion, setFromVersion] = useState<number | null>(null)
+  const [toVersion, setToVersion] = useState<number | null>(null)
+  const [diffResult, setDiffResult] = useState<PolicyVersionDiff | null>(null)
+  const [isDiffLoading, setIsDiffLoading] = useState(false)
+  const [diffError, setDiffError] = useState<string | null>(null)
 
   const overview = useAsyncData<PolicyOverview>(
     (signal) => getPolicyOverview(policyId ?? '', signal),
@@ -126,6 +165,17 @@ export function PolicyDetailPage() {
     (data) => data.length === 0,
     { enabled: Boolean(policyId) },
   )
+
+  // Diff selectors default to the two newest snapshots once history
+  // loads. Derived during render (not an effect), so an explicit user
+  // selection in state always wins and there is no first-frame flash.
+  const versionOptions = versions.data
+    ? sortVersionsNewestFirst(versions.data)
+    : []
+  const defaultPair = latestAdjacentPair(versionOptions)
+  const effectiveFrom = fromVersion ?? defaultPair?.from ?? null
+  const effectiveTo = toVersion ?? defaultPair?.to ?? null
+  const hasVersionsForDiff = versionOptions.length >= 2
 
   const changes = useAsyncData<PolicyChangeRecord[]>(
     (signal) => listPolicyChanges(policyId ?? '', { page: 0, size: 10 }, signal),
@@ -158,8 +208,29 @@ export function PolicyDetailPage() {
 
   const checkBusy = isChecking || overview.status === 'loading'
 
-  const runManualCheck = async () => {
-    if (!policyId || !checkNowEnabled(data?.status, checkBusy)) return
+  const fetchVersionDiff = async (from: number | null, to: number | null) => {
+    if (!policyId) return
+    const invalid = validateDiffPair(from, to)
+    if (invalid || from === null || to === null) {
+      setDiffError(invalid ?? 'Select two versions to compare.')
+      return
+    }
+    setDiffError(null)
+    setIsDiffLoading(true)
+    try {
+      // Adjacency was validated above: the backend compares 1-based
+      // version numbers, never row ids.
+      const result = await getVersionDiff(policyId, from, to)
+      setDiffResult(result)
+    } catch (error) {
+      setDiffResult(null)
+      setDiffError(toLifecycleError(error))
+    } finally {
+      setIsDiffLoading(false)
+    }
+  }
+
+  const runManualCheck = async () => {    if (!policyId || !checkNowEnabled(data?.status, checkBusy)) return
     setActionError(null)
     setIsChecking(true)
     try {
@@ -549,6 +620,132 @@ export function PolicyDetailPage() {
                   </li>
                 ))}
               </ul>
+            ) : null}
+          </Section>
+
+          <Section
+            title="Version diff"
+            description="Compare two adjacent snapshots."
+          >
+            {versions.isInitialLoading ? <SkeletonRows rows={2} /> : null}
+
+            {versions.status === 'error' && versions.errorMessage ? (
+              <ErrorState message={versions.errorMessage} onRetry={versions.reload} />
+            ) : null}
+
+            {versions.status === 'success' && !hasVersionsForDiff ? (
+              <EmptyState
+                title="Not enough versions yet"
+                description="Record at least two snapshots — run checks until the version history grows — then pick a pair to compare."
+              />
+            ) : null}
+
+            {hasVersionsForDiff ? (
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:items-end">
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="diff-from" className="type-label text-ink-muted">
+                    From version
+                  </label>
+                  <select
+                    id="diff-from"
+                    value={effectiveFrom ?? ''}
+                    onChange={(event) => setFromVersion(Number(event.target.value))}
+                    disabled={isDiffLoading}
+                    className="min-h-11 w-full border border-line-strong bg-transparent px-4 py-3 font-body text-base text-ink transition-colors duration-150 ease-standard focus:border-accent-soft focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {versionOptions.map((version) => (
+                      <option key={version.id} value={version.versionNumber}>
+                        v{version.versionNumber}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="diff-to" className="type-label text-ink-muted">
+                    To version
+                  </label>
+                  <select
+                    id="diff-to"
+                    value={effectiveTo ?? ''}
+                    onChange={(event) => setToVersion(Number(event.target.value))}
+                    disabled={isDiffLoading}
+                    className="min-h-11 w-full border border-line-strong bg-transparent px-4 py-3 font-body text-base text-ink transition-colors duration-150 ease-standard focus:border-accent-soft focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {versionOptions.map((version) => (
+                      <option key={version.id} value={version.versionNumber}>
+                        v{version.versionNumber}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Button
+                    variant="primary"
+                    onClick={() => void fetchVersionDiff(effectiveFrom, effectiveTo)}
+                    isLoading={isDiffLoading}
+                    disabled={isDiffLoading}
+                    fullWidth
+                  >
+                    {isDiffLoading ? 'Loading diff…' : 'Show diff'}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {isDiffLoading ? <SkeletonRows rows={2} /> : null}
+
+            {diffError ? (
+              <div className="mt-6">
+                <ErrorState
+                  message={diffError}
+                  onRetry={() => void fetchVersionDiff(effectiveFrom, effectiveTo)}
+                />
+              </div>
+            ) : null}
+
+            {diffResult ? (
+              <div className="mt-6">
+                <p className="font-body text-base text-ink">
+                  v{diffResult.fromVersion} → v{diffResult.toVersion}
+                </p>
+                <p className="mt-1 font-body text-sm text-ink-ghost">
+                  {diffResult.changes.length}{' '}
+                  {diffResult.changes.length === 1 ? 'change' : 'changes'}
+                </p>
+                {diffResult.changes.length > 0 ? (
+                  <ul className="mt-6 divide-y divide-line border-y border-line">
+                    {diffResult.changes.map((change) => (
+                      <li key={change.id} className="py-5">
+                        <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+                          <span className="font-body text-base text-ink">
+                            {changeTypeLabel(change.changeType)}
+                          </span>
+                          <span className="font-body text-sm text-ink-ghost">
+                            v{change.versionNumber} · position {change.changeOrder}
+                          </span>
+                        </div>
+                        {change.oldText ? (
+                          <p className="mt-3 font-body text-sm text-ink-ghost">
+                            <span className="type-label text-ink-faint">Removed: </span>
+                            {change.oldText}
+                          </p>
+                        ) : null}
+                        {change.newText ? (
+                          <p className="mt-3 font-body text-sm text-ink">
+                            <span className="type-label text-ink-faint">Added: </span>
+                            {change.newText}
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <EmptyState
+                    title="No differences in this transition"
+                    description="The two snapshots produced no recorded changes."
+                  />
+                )}
+              </div>
             ) : null}
           </Section>
         </>

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerAuthBridge } from './client'
 import {
   archivePolicy,
+  getVersionDiff,
   listPolicyChecks,
   listPolicyChanges,
   listPolicyVersions,
@@ -298,6 +299,67 @@ describe('listPolicyChanges', () => {
       newText: 'new clause text',
       changeOrder: 0,
       versionNumber: 2,
+    })
+  })
+})
+
+describe('getVersionDiff', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    registerAuthBridge(null)
+  })
+
+  it('requests the adjacent transition and returns its change rows', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            policyId: 'policy-id-7',
+            fromVersion: 1,
+            toVersion: 2,
+            fromVersionId: 'version-1',
+            toVersionId: 'version-2',
+            changes: [
+              {
+                id: 'change-1',
+                changeType: 'MODIFIED',
+                oldText: 'old clause',
+                newText: 'new clause',
+                changeOrder: 0,
+                versionNumber: 2,
+                newVersionId: 'version-2',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const diff = await getVersionDiff('policy-id-7', 1, 2)
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url.endsWith('/api/v1/policies/policy-id-7/versions/1/diff/2')).toBe(
+      true,
+    )
+    expect(init.method ?? 'GET').toBe('GET')
+    expect(new Headers(init.headers).get('Authorization')).toBe(
+      'Bearer test-access-token',
+    )
+    expect(diff).toMatchObject({ fromVersion: 1, toVersion: 2 })
+    expect(diff.changes).toHaveLength(1)
+    expect(diff.changes[0]).toMatchObject({
+      changeType: 'MODIFIED',
+      oldText: 'old clause',
+      newText: 'new clause',
     })
   })
 })

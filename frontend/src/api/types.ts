@@ -295,3 +295,20 @@ export interface PolicyChangeRecord {
   versionNumber: number
   newVersionId: string
 }
+
+/**
+ * `GET /api/v1/policies/{policyId}/versions/{from}/diff/{to}`.
+ * Mirrors backend `VersionDiffResponse` exactly: the requested
+ * adjacent transition (`from`/`to` are 1-based version numbers with
+ * `to == from + 1`) plus exactly its persisted change rows in
+ * `changeOrder` order. The diff is never recomputed and never spans
+ * multiple transitions; non-adjacent ranges answer `400`.
+ */
+export interface PolicyVersionDiff {
+  policyId: string
+  fromVersion: number
+  toVersion: number
+  fromVersionId: string
+  toVersionId: string
+  changes: PolicyChangeRecord[]
+}

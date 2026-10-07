@@ -7,6 +7,7 @@ import type {
   PolicyCheckHistoryEntry,
   PolicyCheckResult,
   PolicyOverview,
+  PolicyVersionDiff,
   PolicyVersionSummary,
 } from './types'
 
@@ -99,6 +100,23 @@ export function listPolicyChanges(
   return apiRequest<PolicyChangeRecord[]>(
     `/api/v1/policies/${policyId}/changes`,
     { query: { ...params }, signal },
+  )
+}
+
+/**
+ * One adjacent version transition (`to` must equal `from + 1`, both
+ * 1-based version numbers — anything else answers `400`). Returns the
+ * persisted change rows only; nothing is recomputed.
+ */
+export function getVersionDiff(
+  policyId: string,
+  from: number,
+  to: number,
+  signal?: AbortSignal,
+): Promise<PolicyVersionDiff> {
+  return apiRequest<PolicyVersionDiff>(
+    `/api/v1/policies/${policyId}/versions/${from}/diff/${to}`,
+    { signal },
   )
 }
 
