@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { archivePolicy, getPolicyOverview, listPolicyChecks, reactivatePolicy, runPolicyCheck } from '../../api/policies'
+import { archivePolicy, getPolicyOverview, listPolicyChecks, listPolicyVersions, reactivatePolicy, runPolicyCheck } from '../../api/policies'
 import { isApiError, toErrorMessage } from '../../api/errors'
 import {
   EmptyState,
@@ -21,7 +21,7 @@ import {
   statusLabel,
 } from '../../lib/format'
 import { ROUTES } from '../../app/routes'
-import type { PolicyCheckHistoryEntry, PolicyCheckResult, PolicyOverview, PolicyStatus } from '../../api/types'
+import type { PolicyCheckHistoryEntry, PolicyCheckResult, PolicyOverview, PolicyStatus, PolicyVersionSummary } from '../../api/types'
 
 /**
  * Lifecycle action available for a policy status.
@@ -83,6 +83,17 @@ export function checkOutcomeLabel(outcome: string): string {
 }
 
 /**
+ * Presents version history newest-first. The backend feed orders
+ * ascending by version number, so the page sorts explicitly rather
+ * than relying on transport order.
+ */
+export function sortVersionsNewestFirst(
+  versions: PolicyVersionSummary[],
+): PolicyVersionSummary[] {
+  return [...versions].sort((a, b) => b.versionNumber - a.versionNumber)
+}
+
+/**
  * Policy detail foundation.
  *
  * Phase 18-A establishes the shell and surfaces the real overview from
@@ -105,6 +116,12 @@ export function PolicyDetailPage() {
 
   const checks = useAsyncData<PolicyCheckHistoryEntry[]>(
     (signal) => listPolicyChecks(policyId ?? '', { page: 0, size: 10 }, signal),
+    (data) => data.length === 0,
+    { enabled: Boolean(policyId) },
+  )
+
+  const versions = useAsyncData<PolicyVersionSummary[]>(
+    (signal) => listPolicyVersions(policyId ?? '', { page: 0, size: 10 }, signal),
     (data) => data.length === 0,
     { enabled: Boolean(policyId) },
   )
@@ -141,11 +158,12 @@ export function PolicyDetailPage() {
     try {
       const result = await runPolicyCheck(policyId)
       setCheckResult(result)
-      // Re-read the overview and the check history so the latest
-      // version, check, and impact blocks reflect the check that
-      // just ran.
+      // Re-read the overview, the check history, and the version
+      // history so every block reflects the check that just ran (a
+      // check can record a brand-new version).
       overview.reload()
       checks.reload()
+      versions.reload()
     } catch (error) {
       // 409 (archived/in-flight), 502 (fetch failure), 404, and
       // network errors all land here with the backend's message.
@@ -416,6 +434,55 @@ export function PolicyDetailPage() {
                         {entry.errorMessage}
                       </p>
                     ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </Section>
+
+          <Section
+            title="Versions"
+            description="Every observed snapshot of this document, newest first."
+            actions={
+              <Button
+                variant="secondary"
+                onClick={versions.reload}
+                isLoading={versions.status === 'loading'}
+              >
+                Refresh
+              </Button>
+            }
+          >
+            {versions.isInitialLoading ? <SkeletonRows rows={3} /> : null}
+
+            {versions.status === 'error' && versions.errorMessage ? (
+              <ErrorState message={versions.errorMessage} onRetry={versions.reload} />
+            ) : null}
+
+            {versions.isEmpty ? (
+              <EmptyState
+                title="No versions observed yet"
+                description="Run a manual check or wait for the next scheduled check to record the first snapshot."
+              />
+            ) : null}
+
+            {versions.data && versions.data.length > 0 ? (
+              <ul className="divide-y divide-line border-y border-line">
+                {sortVersionsNewestFirst(versions.data).map((version) => (
+                  <li key={version.id} className="py-5">
+                    <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+                      <span className="font-body text-base text-ink">
+                        v{version.versionNumber}
+                      </span>
+                      <span className="font-body text-sm text-ink-ghost">
+                        <time dateTime={version.observedAt}>
+                          {formatDateTime(version.observedAt)}
+                        </time>
+                      </span>
+                    </div>
+                    <p className="mt-3 break-all font-body text-sm text-ink-ghost">
+                      {version.contentHash}
+                    </p>
                   </li>
                 ))}
               </ul>

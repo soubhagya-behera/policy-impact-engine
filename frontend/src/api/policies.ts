@@ -6,6 +6,7 @@ import type {
   PolicyCheckHistoryEntry,
   PolicyCheckResult,
   PolicyOverview,
+  PolicyVersionSummary,
 } from './types'
 
 /** Policy endpoints, mirroring `PolicyController`. */
@@ -62,6 +63,23 @@ export function listPolicyChecks(
 ): Promise<PolicyCheckHistoryEntry[]> {
   return apiRequest<PolicyCheckHistoryEntry[]>(
     `/api/v1/policies/${policyId}/checks`,
+    { query: { ...params }, signal },
+  )
+}
+
+/**
+ * Version history, windowed by `page`/`size` like every other feed.
+ * The backend orders ascending by version number; newest-first
+ * presentation is the caller's concern (see `sortVersionsNewestFirst`
+ * on the detail page).
+ */
+export function listPolicyVersions(
+  policyId: string,
+  params: PageParams = {},
+  signal?: AbortSignal,
+): Promise<PolicyVersionSummary[]> {
+  return apiRequest<PolicyVersionSummary[]>(
+    `/api/v1/policies/${policyId}/versions`,
     { query: { ...params }, signal },
   )
 }

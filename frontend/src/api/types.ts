@@ -247,7 +247,8 @@ export interface PolicyCheckResult {
 }
 
 /** `GET /api/v1/policies/{policyId}/checks`. */
-export interface PolicyCheckHistoryEntry {  id: string
+export interface PolicyCheckHistoryEntry {
+  id: string
   trigger: string
   attemptNumber: number
   status: FetchAttemptStatus
@@ -258,4 +259,19 @@ export interface PolicyCheckHistoryEntry {  id: string
   errorMessage: string | null
   startedAt: string
   completedAt: string | null
+}
+
+/**
+ * `GET /api/v1/policies/{policyId}/versions` row. Mirrors backend
+ * `VersionSummaryResponse` exactly: identity plus the 1-based sequence
+ * number, content hash, and observation time — never the normalized
+ * content (that lives behind the version-detail endpoint, which this
+ * UI does not surface yet).
+ */
+export interface PolicyVersionSummary {
+  id: string
+  policyId: string
+  versionNumber: number
+  contentHash: string
+  observedAt: string
 }

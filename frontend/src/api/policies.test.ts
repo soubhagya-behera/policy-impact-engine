@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerAuthBridge } from './client'
-import { archivePolicy, listPolicyChecks, reactivatePolicy, runPolicyCheck } from './policies'
+import {
+  archivePolicy,
+  listPolicyChecks,
+  listPolicyVersions,
+  reactivatePolicy,
+  runPolicyCheck,
+} from './policies'
 
 /**
  * Archive/reactivate request contract, backing the policy-detail
@@ -180,6 +186,59 @@ describe('listPolicyChecks', () => {
       trigger: 'MANUAL',
       attemptNumber: 2,
       status: 'SUCCESS',
+    })
+  })
+})
+
+describe('listPolicyVersions', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    registerAuthBridge(null)
+  })
+
+  it('sends an authenticated GET with page and size', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              id: 'version-1',
+              policyId: 'policy-id-5',
+              versionNumber: 1,
+              contentHash: 'deadbeef',
+              observedAt: '2026-10-07T10:00:00Z',
+            },
+          ]),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const versions = await listPolicyVersions(
+      'policy-id-5',
+      { page: 0, size: 10 },
+    )
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url).toContain('/api/v1/policies/policy-id-5/versions')
+    expect(url).toContain('page=0')
+    expect(url).toContain('size=10')
+    expect(init.method ?? 'GET').toBe('GET')
+    expect(new Headers(init.headers).get('Authorization')).toBe(
+      'Bearer test-access-token',
+    )
+    expect(versions).toHaveLength(1)
+    expect(versions[0]).toMatchObject({
+      versionNumber: 1,
+      contentHash: 'deadbeef',
     })
   })
 })

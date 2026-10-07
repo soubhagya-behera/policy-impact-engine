@@ -4,6 +4,7 @@ import {
   checkNowEnabled,
   checkOutcomeLabel,
   lifecycleAction,
+  sortVersionsNewestFirst,
   toLifecycleError,
 } from './PolicyDetailPage'
 
@@ -107,5 +108,36 @@ describe('checkOutcomeLabel', () => {
 
   it('renders unknown outcomes verbatim', () => {
     expect(checkOutcomeLabel('SOMETHING_NEW')).toBe('SOMETHING_NEW')
+  })
+})
+
+describe('sortVersionsNewestFirst', () => {
+  function version(versionNumber: number) {
+    return {
+      id: `version-${versionNumber}`,
+      policyId: 'policy-1',
+      versionNumber,
+      contentHash: `hash-${versionNumber}`,
+      observedAt: '2026-10-07T10:00:00Z',
+    }
+  }
+
+  it('orders an ascending feed newest-first', () => {
+    expect(
+      sortVersionsNewestFirst([version(1), version(2), version(3)]).map(
+        (entry) => entry.versionNumber,
+      ),
+    ).toEqual([3, 2, 1])
+  })
+
+  it('leaves empty and single-item feeds untouched', () => {
+    expect(sortVersionsNewestFirst([])).toEqual([])
+    expect(sortVersionsNewestFirst([version(1)]).map((e) => e.versionNumber)).toEqual([1])
+  })
+
+  it('does not mutate the backend-ordered input', () => {
+    const input = [version(1), version(2)]
+    sortVersionsNewestFirst(input)
+    expect(input.map((entry) => entry.versionNumber)).toEqual([1, 2])
   })
 })
