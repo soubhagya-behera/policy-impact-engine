@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ImpactSummary } from '../api/types'
-import { maxImpactScoreDisplay } from './format'
+import { formatBytes, formatDurationMs, maxImpactScoreDisplay } from './format'
 
 /**
  * The backend reports `maxAggregateScore: 0` for a user with no
@@ -51,5 +51,29 @@ describe('maxImpactScoreDisplay', () => {
         summaryWith({ totalAssessments: 2, maxAggregateScore: 0 }),
       ),
     ).toBe(0)
+  })
+})
+
+describe('formatBytes', () => {
+  it('renders a dash when nothing was measured', () => {
+    expect(formatBytes(null)).toBe('—')
+    expect(formatBytes(undefined)).toBe('—')
+  })
+
+  it('renders measured byte counts', () => {
+    expect(formatBytes(0)).toBe('0 bytes')
+    expect(formatBytes(1234567)).toBe('1,234,567 bytes')
+  })
+})
+
+describe('formatDurationMs', () => {
+  it('renders a dash while still running', () => {
+    expect(formatDurationMs(null)).toBe('—')
+    expect(formatDurationMs(undefined)).toBe('—')
+  })
+
+  it('renders measured durations', () => {
+    expect(formatDurationMs(0)).toBe('0 ms')
+    expect(formatDurationMs(1500)).toBe('1,500 ms')
   })
 })

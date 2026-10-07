@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerAuthBridge } from './client'
-import { archivePolicy, reactivatePolicy, runPolicyCheck } from './policies'
+import { archivePolicy, listPolicyChecks, reactivatePolicy, runPolicyCheck } from './policies'
 
 /**
  * Archive/reactivate request contract, backing the policy-detail
@@ -120,6 +120,66 @@ describe('runPolicyCheck', () => {
       versionNumber: 2,
       changeCount: 4,
       attemptStatus: 'SUCCESS',
+    })
+  })
+})
+
+describe('listPolicyChecks', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    registerAuthBridge(null)
+  })
+
+  it('sends an authenticated GET with page and size', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              id: 'attempt-1',
+              trigger: 'MANUAL',
+              attemptNumber: 2,
+              status: 'SUCCESS',
+              failureKind: null,
+              httpStatus: 200,
+              bytesFetched: 1234,
+              durationMs: 567,
+              errorMessage: null,
+              startedAt: '2026-10-07T10:00:00Z',
+              completedAt: '2026-10-07T10:00:01Z',
+            },
+          ]),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const entries = await listPolicyChecks(
+      'policy-id-4',
+      { page: 0, size: 10 },
+    )
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url).toContain('/api/v1/policies/policy-id-4/checks')
+    expect(url).toContain('page=0')
+    expect(url).toContain('size=10')
+    expect(init.method ?? 'GET').toBe('GET')
+    expect(new Headers(init.headers).get('Authorization')).toBe(
+      'Bearer test-access-token',
+    )
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      trigger: 'MANUAL',
+      attemptNumber: 2,
+      status: 'SUCCESS',
     })
   })
 })

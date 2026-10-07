@@ -116,6 +116,18 @@ export function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\/$/, '')
 }
 
+/** Byte counts for fetch attempts; null (never measured) renders as a dash. */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined) return '—'
+  return `${bytes.toLocaleString('en-US')} bytes`
+}
+
+/** Attempt durations; null (still running) renders as a dash. */
+export function formatDurationMs(durationMs: number | null | undefined): string {
+  if (durationMs === null || durationMs === undefined) return '—'
+  return `${durationMs.toLocaleString('en-US')} ms`
+}
+
 /**
  * Highest measured aggregate score for the headline figure.
  *

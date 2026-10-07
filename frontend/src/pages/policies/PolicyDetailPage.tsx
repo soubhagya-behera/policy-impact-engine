@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { archivePolicy, getPolicyOverview, reactivatePolicy, runPolicyCheck } from '../../api/policies'
+import { archivePolicy, getPolicyOverview, listPolicyChecks, reactivatePolicy, runPolicyCheck } from '../../api/policies'
 import { isApiError, toErrorMessage } from '../../api/errors'
 import {
   EmptyState,
@@ -15,11 +15,13 @@ import { useAsyncData } from '../../hooks/useAsyncData'
 import {
   bandColor,
   bandLabel,
+  formatBytes,
   formatDateTime,
+  formatDurationMs,
   statusLabel,
 } from '../../lib/format'
 import { ROUTES } from '../../app/routes'
-import type { PolicyCheckResult, PolicyOverview, PolicyStatus } from '../../api/types'
+import type { PolicyCheckHistoryEntry, PolicyCheckResult, PolicyOverview, PolicyStatus } from '../../api/types'
 
 /**
  * Lifecycle action available for a policy status.
@@ -101,6 +103,12 @@ export function PolicyDetailPage() {
     { enabled: Boolean(policyId) },
   )
 
+  const checks = useAsyncData<PolicyCheckHistoryEntry[]>(
+    (signal) => listPolicyChecks(policyId ?? '', { page: 0, size: 10 }, signal),
+    (data) => data.length === 0,
+    { enabled: Boolean(policyId) },
+  )
+
   if (!policyId) {
     return (
       <PageContainer>
@@ -133,9 +141,11 @@ export function PolicyDetailPage() {
     try {
       const result = await runPolicyCheck(policyId)
       setCheckResult(result)
-      // Re-read the overview so the latest version, check, and impact
-      // blocks reflect the check that just ran.
+      // Re-read the overview and the check history so the latest
+      // version, check, and impact blocks reflect the check that
+      // just ran.
       overview.reload()
+      checks.reload()
     } catch (error) {
       // 409 (archived/in-flight), 502 (fetch failure), 404, and
       // network errors all land here with the backend's message.
@@ -333,6 +343,84 @@ export function PolicyDetailPage() {
               </dl>
             </Section>
           ) : null}
+
+          <Section
+            title="Check history"
+            description="Every recorded check for this document, newest first."
+            actions={
+              <Button
+                variant="secondary"
+                onClick={checks.reload}
+                isLoading={checks.status === 'loading'}
+              >
+                Refresh
+              </Button>
+            }
+          >
+            {checks.isInitialLoading ? <SkeletonRows rows={3} /> : null}
+
+            {checks.status === 'error' && checks.errorMessage ? (
+              <ErrorState message={checks.errorMessage} onRetry={checks.reload} />
+            ) : null}
+
+            {checks.isEmpty ? (
+              <EmptyState
+                title="No checks recorded yet"
+                description="Run a manual check or wait for the next scheduled check to see its history here."
+              />
+            ) : null}
+
+            {checks.data && checks.data.length > 0 ? (
+              <ul className="divide-y divide-line border-y border-line">
+                {checks.data.map((entry) => (
+                  <li key={entry.id} className="py-5">
+                    <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+                      <span className="font-body text-base text-ink">
+                        {entry.status}
+                      </span>
+                      <span className="font-body text-sm text-ink-ghost">
+                        Attempt {entry.attemptNumber} · {entry.trigger}
+                      </span>
+                      {entry.httpStatus ? (
+                        <span className="font-body text-sm text-ink-ghost">
+                          HTTP {entry.httpStatus}
+                        </span>
+                      ) : null}
+                      {entry.failureKind ? (
+                        <span className="font-body text-sm text-ink-ghost">
+                          {entry.failureKind}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-3 font-body text-sm text-ink-ghost">
+                      <time dateTime={entry.startedAt}>
+                        {formatDateTime(entry.startedAt)}
+                      </time>
+                      {entry.completedAt ? (
+                        <>
+                          {' → '}
+                          <time dateTime={entry.completedAt}>
+                            {formatDateTime(entry.completedAt)}
+                          </time>
+                        </>
+                      ) : (
+                        ' · In progress'
+                      )}
+                      {' · '}
+                      {formatBytes(entry.bytesFetched)}
+                      {' · '}
+                      {formatDurationMs(entry.durationMs)}
+                    </p>
+                    {entry.errorMessage ? (
+                      <p className="mt-3 font-body text-sm text-accent-soft">
+                        {entry.errorMessage}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </Section>
         </>
       ) : null}
     </PageContainer>
