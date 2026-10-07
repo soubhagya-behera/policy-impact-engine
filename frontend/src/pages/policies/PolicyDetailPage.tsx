@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getPolicyOverview } from '../../api/policies'
+import { archivePolicy, getPolicyOverview, reactivatePolicy } from '../../api/policies'
+import { isApiError, toErrorMessage } from '../../api/errors'
 import {
   EmptyState,
   ErrorState,
@@ -17,7 +19,36 @@ import {
   statusLabel,
 } from '../../lib/format'
 import { ROUTES } from '../../app/routes'
-import type { PolicyOverview } from '../../api/types'
+import type { PolicyOverview, PolicyStatus } from '../../api/types'
+
+/**
+ * Lifecycle action available for a policy status.
+ *
+ * `ACTIVE` policies can be archived; `ARCHIVED` policies can be
+ * reactivated; anything else (including not-yet-loaded) offers no
+ * action. Both operations are idempotent server-side (`204` on
+ * repeats), so this mapping only decides which button to show.
+ */
+export function lifecycleAction(
+  status: PolicyStatus | null | undefined,
+): 'archive' | 'reactivate' | null {
+  if (status === 'ACTIVE') return 'archive'
+  if (status === 'ARCHIVED') return 'reactivate'
+  return null
+}
+
+/**
+ * User-facing message for a failed archive/reactivate request.
+ * A `404` means the policy is gone (or never belonged to this
+ * account); every other failure surfaces the backend's own message
+ * verbatim, including validation, conflict, and network errors.
+ */
+export function toLifecycleError(error: unknown): string {
+  if (isApiError(error) && error.status === 404) {
+    return 'This policy no longer exists. It may have been removed.'
+  }
+  return toErrorMessage(error)
+}
 
 /**
  * Policy detail foundation.
@@ -29,6 +60,8 @@ import type { PolicyOverview } from '../../api/types'
  */
 export function PolicyDetailPage() {
   const { policyId } = useParams<{ policyId: string }>()
+  const [isActing, setIsActing] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const overview = useAsyncData<PolicyOverview>(
     (signal) => getPolicyOverview(policyId ?? '', signal),
@@ -53,6 +86,31 @@ export function PolicyDetailPage() {
   }
 
   const data = overview.data
+  const action = lifecycleAction(data?.status)
+  // Disabled until the overview has loaded and while a lifecycle
+  // request (or its follow-up refresh) is in flight, so the button
+  // can never fire against stale or unknown state.
+  const actionDisabled = isActing || overview.status === 'loading'
+
+  const runLifecycleAction = async () => {
+    if (!policyId || !action || actionDisabled) return
+    setActionError(null)
+    setIsActing(true)
+    try {
+      if (action === 'archive') {
+        await archivePolicy(policyId)
+      } else {
+        await reactivatePolicy(policyId)
+      }
+      // Re-read the overview: the fresh status renders from real
+      // backend state with no browser reload.
+      overview.reload()
+    } catch (error) {
+      setActionError(toLifecycleError(error))
+    } finally {
+      setIsActing(false)
+    }
+  }
 
   return (
     <PageContainer>
@@ -61,11 +119,42 @@ export function PolicyDetailPage() {
         title={data?.name ?? 'Policy detail'}
         {...(data?.url ? { description: data.url } : {})}
         actions={
-          <Link to={ROUTES.policies}>
-            <Button variant="secondary">Back to policies</Button>
-          </Link>
+          <>
+            {action === 'archive' ? (
+              <Button
+                variant="danger"
+                onClick={() => void runLifecycleAction()}
+                isLoading={isActing}
+                disabled={actionDisabled}
+              >
+                {isActing ? 'Archiving…' : 'Archive'}
+              </Button>
+            ) : null}
+            {action === 'reactivate' ? (
+              <Button
+                variant="primary"
+                onClick={() => void runLifecycleAction()}
+                isLoading={isActing}
+                disabled={actionDisabled}
+              >
+                {isActing ? 'Reactivating…' : 'Reactivate'}
+              </Button>
+            ) : null}
+            <Link to={ROUTES.policies}>
+              <Button variant="secondary">Back to policies</Button>
+            </Link>
+          </>
         }
       />
+
+      {actionError ? (
+        <div
+          role="alert"
+          className="border border-accent-soft/40 bg-surface px-4 py-3 font-body text-base text-accent-soft"
+        >
+          {actionError}
+        </div>
+      ) : null}
 
       {overview.isInitialLoading ? <SkeletonRows rows={3} /> : null}
 
