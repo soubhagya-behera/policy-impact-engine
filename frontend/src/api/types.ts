@@ -229,9 +229,25 @@ export interface PageParams {
   size?: number
 }
 
+/**
+ * `POST /api/v1/policies/{policyId}/check` -> 200 with the terminal
+ * observation result. Mirrors backend `PolicyCheckResponse` exactly:
+ * `outcome` is one of `FIRST_VERSION`, `UNCHANGED`, `NEW_VERSION`;
+ * `attemptStatus` is `SUCCESS`, or `SKIPPED_UNCHANGED` when the outcome
+ * is `UNCHANGED`. Archived/in-flight checks answer `409`, fetch
+ * failures `502` — both surface as `ApiError`, never in this shape.
+ */
+export interface PolicyCheckResult {
+  policyId: string
+  outcome: string
+  versionNumber: number
+  contentHash: string
+  changeCount: number
+  attemptStatus: string
+}
+
 /** `GET /api/v1/policies/{policyId}/checks`. */
-export interface PolicyCheckHistoryEntry {
-  id: string
+export interface PolicyCheckHistoryEntry {  id: string
   trigger: string
   attemptNumber: number
   status: FetchAttemptStatus

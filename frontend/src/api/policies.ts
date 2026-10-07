@@ -4,6 +4,7 @@ import type {
   PageParams,
   Policy,
   PolicyCheckHistoryEntry,
+  PolicyCheckResult,
   PolicyOverview,
 } from './types'
 
@@ -66,12 +67,13 @@ export function listPolicyChecks(
 }
 
 /**
- * Triggers a manual check. The backend answers 409 when another check already
- * holds the claim or the policy is archived, and 502 on a fetch failure —
- * both surface to the caller as an `ApiError` and are handled per-panel.
+ * Triggers a manual check. The backend answers 200 with the terminal
+ * `PolicyCheckResult`, 409 when another check already holds the claim
+ * or the policy is archived, and 502 on a fetch failure — the latter
+ * surface to the caller as an `ApiError` and are handled per-panel.
  */
-export function runPolicyCheck(policyId: string): Promise<unknown> {
-  return apiRequest<unknown>(`/api/v1/policies/${policyId}/check`, {
+export function runPolicyCheck(policyId: string): Promise<PolicyCheckResult> {
+  return apiRequest<PolicyCheckResult>(`/api/v1/policies/${policyId}/check`, {
     method: 'POST',
   })
 }

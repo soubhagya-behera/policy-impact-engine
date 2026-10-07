@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { archivePolicy, getPolicyOverview, reactivatePolicy } from '../../api/policies'
+import { archivePolicy, getPolicyOverview, reactivatePolicy, runPolicyCheck } from '../../api/policies'
 import { isApiError, toErrorMessage } from '../../api/errors'
 import {
   EmptyState,
@@ -19,7 +19,7 @@ import {
   statusLabel,
 } from '../../lib/format'
 import { ROUTES } from '../../app/routes'
-import type { PolicyOverview, PolicyStatus } from '../../api/types'
+import type { PolicyCheckResult, PolicyOverview, PolicyStatus } from '../../api/types'
 
 /**
  * Lifecycle action available for a policy status.
@@ -51,6 +51,36 @@ export function toLifecycleError(error: unknown): string {
 }
 
 /**
+ * Whether the manual "Check now" action may fire: only for an
+ * `ACTIVE` policy while no check (and no overview refresh it would
+ * race) is running. Pinned by tests because the button's disabled
+ * state cannot be asserted without a DOM harness.
+ */
+export function checkNowEnabled(
+  status: PolicyStatus | null | undefined,
+  busy: boolean,
+): boolean {
+  return status === 'ACTIVE' && !busy
+}
+
+/**
+ * Human label for a terminal manual-check outcome. Unknown future
+ * outcomes render verbatim rather than crashing or inventing text.
+ */
+export function checkOutcomeLabel(outcome: string): string {
+  switch (outcome) {
+    case 'FIRST_VERSION':
+      return 'First version recorded'
+    case 'NEW_VERSION':
+      return 'New version detected'
+    case 'UNCHANGED':
+      return 'No changes since last check'
+    default:
+      return outcome
+  }
+}
+
+/**
  * Policy detail foundation.
  *
  * Phase 18-A establishes the shell and surfaces the real overview from
@@ -61,7 +91,9 @@ export function toLifecycleError(error: unknown): string {
 export function PolicyDetailPage() {
   const { policyId } = useParams<{ policyId: string }>()
   const [isActing, setIsActing] = useState(false)
+  const [isChecking, setIsChecking] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [checkResult, setCheckResult] = useState<PolicyCheckResult | null>(null)
 
   const overview = useAsyncData<PolicyOverview>(
     (signal) => getPolicyOverview(policyId ?? '', signal),
@@ -92,6 +124,27 @@ export function PolicyDetailPage() {
   // can never fire against stale or unknown state.
   const actionDisabled = isActing || overview.status === 'loading'
 
+  const checkBusy = isChecking || overview.status === 'loading'
+
+  const runManualCheck = async () => {
+    if (!policyId || !checkNowEnabled(data?.status, checkBusy)) return
+    setActionError(null)
+    setIsChecking(true)
+    try {
+      const result = await runPolicyCheck(policyId)
+      setCheckResult(result)
+      // Re-read the overview so the latest version, check, and impact
+      // blocks reflect the check that just ran.
+      overview.reload()
+    } catch (error) {
+      // 409 (archived/in-flight), 502 (fetch failure), 404, and
+      // network errors all land here with the backend's message.
+      setActionError(toLifecycleError(error))
+    } finally {
+      setIsChecking(false)
+    }
+  }
+
   const runLifecycleAction = async () => {
     if (!policyId || !action || actionDisabled) return
     setActionError(null)
@@ -120,6 +173,16 @@ export function PolicyDetailPage() {
         {...(data?.url ? { description: data.url } : {})}
         actions={
           <>
+            {data?.status === 'ACTIVE' ? (
+              <Button
+                variant="primary"
+                onClick={() => void runManualCheck()}
+                isLoading={isChecking}
+                disabled={checkBusy}
+              >
+                {isChecking ? 'Checking…' : 'Check now'}
+              </Button>
+            ) : null}
             {action === 'archive' ? (
               <Button
                 variant="danger"
@@ -238,6 +301,38 @@ export function PolicyDetailPage() {
               />
             )}
           </Section>
+
+          {checkResult ? (
+            <Section
+              title="Check result"
+              description="The terminal outcome of the manual check just run."
+            >
+              <dl className="grid grid-cols-1 gap-x-8 gap-y-8 sm:grid-cols-3">
+                <div>
+                  <dt className="type-label text-ink-faint">Outcome</dt>
+                  <dd className="mt-3 font-body text-base text-ink">
+                    {checkOutcomeLabel(checkResult.outcome)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="type-label text-ink-faint">Version</dt>
+                  <dd className="mt-3 font-body text-base text-ink">
+                    v{checkResult.versionNumber}
+                  </dd>
+                  <dd className="mt-1 font-body text-sm text-ink-ghost">
+                    {checkResult.changeCount}{' '}
+                    {checkResult.changeCount === 1 ? 'change' : 'changes'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="type-label text-ink-faint">Attempt</dt>
+                  <dd className="mt-3 font-body text-base text-ink">
+                    {checkResult.attemptStatus}
+                  </dd>
+                </div>
+              </dl>
+            </Section>
+          ) : null}
         </>
       ) : null}
     </PageContainer>

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError, NetworkError } from '../../api/errors'
-import { lifecycleAction, toLifecycleError } from './PolicyDetailPage'
+import {
+  checkNowEnabled,
+  checkOutcomeLabel,
+  lifecycleAction,
+  toLifecycleError,
+} from './PolicyDetailPage'
 
 /**
  * Policy-detail lifecycle mapping.
@@ -52,5 +57,55 @@ describe('toLifecycleError', () => {
     expect(toLifecycleError(new NetworkError('down'))).toContain(
       'Could not reach the server',
     )
+  })
+
+  it('surfaces check conflicts verbatim', () => {
+    expect(
+      toLifecycleError(
+        new ApiError(409, '/api/v1/policies/id/check', {
+          title: 'Conflict',
+          detail: 'Another check is already in progress',
+        }),
+      ),
+    ).toContain('Another check is already in progress')
+  })
+
+  it('surfaces fetch failures verbatim', () => {
+    expect(
+      toLifecycleError(
+        new ApiError(502, '/api/v1/policies/id/check', {
+          title: 'Bad Gateway',
+          detail: 'The policy document could not be fetched',
+        }),
+      ),
+    ).toContain('The policy document could not be fetched')
+  })
+})
+
+describe('checkNowEnabled', () => {
+  it('allows a check for an idle ACTIVE policy', () => {
+    expect(checkNowEnabled('ACTIVE', false)).toBe(true)
+  })
+
+  it('blocks a check while busy', () => {
+    expect(checkNowEnabled('ACTIVE', true)).toBe(false)
+  })
+
+  it('blocks a check for non-ACTIVE or unknown status', () => {
+    expect(checkNowEnabled('ARCHIVED', false)).toBe(false)
+    expect(checkNowEnabled(null, false)).toBe(false)
+    expect(checkNowEnabled(undefined, false)).toBe(false)
+  })
+})
+
+describe('checkOutcomeLabel', () => {
+  it('labels every terminal outcome', () => {
+    expect(checkOutcomeLabel('FIRST_VERSION')).toBe('First version recorded')
+    expect(checkOutcomeLabel('NEW_VERSION')).toBe('New version detected')
+    expect(checkOutcomeLabel('UNCHANGED')).toBe('No changes since last check')
+  })
+
+  it('renders unknown outcomes verbatim', () => {
+    expect(checkOutcomeLabel('SOMETHING_NEW')).toBe('SOMETHING_NEW')
   })
 })

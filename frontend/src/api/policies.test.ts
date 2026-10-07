@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerAuthBridge } from './client'
-import { archivePolicy, reactivatePolicy } from './policies'
+import { archivePolicy, reactivatePolicy, runPolicyCheck } from './policies'
 
 /**
  * Archive/reactivate request contract, backing the policy-detail
@@ -72,5 +72,54 @@ describe('reactivatePolicy', () => {
     expect(new Headers(init.headers).get('Authorization')).toBe(
       'Bearer test-access-token',
     )
+  })
+})
+
+describe('runPolicyCheck', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    registerAuthBridge(null)
+  })
+
+  it('sends an authenticated POST and returns the terminal result', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            policyId: 'policy-id-3',
+            outcome: 'NEW_VERSION',
+            versionNumber: 2,
+            contentHash: 'abc123',
+            changeCount: 4,
+            attemptStatus: 'SUCCESS',
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await runPolicyCheck('policy-id-3')
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url.endsWith('/api/v1/policies/policy-id-3/check')).toBe(true)
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeUndefined()
+    expect(new Headers(init.headers).get('Authorization')).toBe(
+      'Bearer test-access-token',
+    )
+    expect(result).toMatchObject({
+      outcome: 'NEW_VERSION',
+      versionNumber: 2,
+      changeCount: 4,
+      attemptStatus: 'SUCCESS',
+    })
   })
 })
