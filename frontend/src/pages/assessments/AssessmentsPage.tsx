@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { listImpactAssessments } from '../../api/impact'
 import type { ImpactAssessmentSummary } from '../../api/types'
-import { policyDetailPath } from '../../app/routes'
+import { policyDetailPath, assessmentDetailPath } from '../../app/routes'
 import { PageContainer } from '../../components/layout/PageContainer'
 import {
   EmptyState,
@@ -74,8 +74,13 @@ export function AssessmentsPage() {
               >
                 <div className="min-w-0">
                   <p className="font-body text-base text-ink">
-                    {bandLabel(assessment.aggregateBand)} ·{' '}
-                    {assessment.aggregateScore}
+                    <Link
+                      to={assessmentDetailPath(assessment.id)}
+                      className="underline underline-offset-4 transition-colors duration-150 ease-standard hover:text-accent-soft"
+                    >
+                      {bandLabel(assessment.aggregateBand)} ·{' '}
+                      {assessment.aggregateScore}
+                    </Link>
                   </p>
                   <p className="mt-1 font-body text-sm text-ink-ghost">
                     v{assessment.previousVersionNumber} → v

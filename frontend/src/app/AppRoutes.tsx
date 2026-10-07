@@ -6,6 +6,7 @@ import { LoginPage } from '../pages/auth/LoginPage'
 import { GoogleCallbackPage } from '../pages/auth/GoogleCallbackPage'
 import { RegisterPage } from '../pages/auth/RegisterPage'
 import { AssessmentsPage } from '../pages/assessments/AssessmentsPage'
+import { AssessmentDetailPage } from '../pages/assessments/AssessmentDetailPage'
 import { DashboardPage } from '../pages/dashboard/DashboardPage'
 import { HomePage } from '../pages/HomePage'
 import { NotFoundPage } from '../pages/NotFoundPage'
@@ -45,6 +46,10 @@ export function AppRoutes() {
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="policies/:policyId" element={<PolicyDetailPage />} />
         <Route path="assessments" element={<AssessmentsPage />} />
+        <Route
+          path="assessments/:assessmentId"
+          element={<AssessmentDetailPage />}
+        />
         <Route path="privacy" element={<PrivacyPage />} />
         <Route path="activity" element={<ActivityPage />} />
       </Route>

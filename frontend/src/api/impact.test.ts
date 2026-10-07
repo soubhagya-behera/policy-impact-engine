@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerAuthBridge } from './client'
-import { getImpactSummary, listImpactAssessments } from './impact'
+import {
+  getImpactAssessment,
+  getImpactSummary,
+  listImpactAssessments,
+} from './impact'
 
 /**
  * Impact feed request contracts.
@@ -120,5 +124,90 @@ describe('getImpactSummary', () => {
     const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url.endsWith('/api/v1/me/impact-summary')).toBe(true)
     expect(summary.latest).toBeNull()
+  })
+})
+
+describe('getImpactAssessment', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    registerAuthBridge(null)
+  })
+
+  it('requests one assessment with its ordered breakdown', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: 'assessment-9',
+            policyId: 'policy-9',
+            versionNumber: 2,
+            previousVersionNumber: 1,
+            aggregateScore: 42,
+            aggregateBand: 'MEDIUM',
+            personalizationRulesVersion: 1,
+            createdAt: '2026-10-07T10:00:00Z',
+            breakdowns: [
+              {
+                changeImpactId: 'ci-1',
+                conceptCode: 'LOCATION',
+                changeType: 'MODIFIED',
+                systemNormalized: 30,
+                systemBand: 'MEDIUM',
+                systemRulesVersion: 2,
+                effectiveSensitivity: 4,
+                personalizedNormalized: 42,
+                personalizedBand: 'MEDIUM',
+                personalizationRulesVersion: 1,
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const detail = await getImpactAssessment('assessment-9')
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url.endsWith('/api/v1/me/impact-assessments/assessment-9')).toBe(
+      true,
+    )
+    expect(init.method ?? 'GET').toBe('GET')
+    expect(new Headers(init.headers).get('Authorization')).toBe(
+      'Bearer test-access-token',
+    )
+    expect(detail.aggregateBand).toBe('MEDIUM')
+    expect(detail.breakdowns).toHaveLength(1)
+    expect(detail.breakdowns[0]).toMatchObject({
+      conceptCode: 'LOCATION',
+      personalizedNormalized: 42,
+    })
+  })
+
+  it('surfaces an unknown assessment as a 404 failure', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ title: 'Not Found', detail: 'Assessment not found' }),
+          {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getImpactAssessment('missing-id')).rejects.toMatchObject({
+      status: 404,
+    })
   })
 })

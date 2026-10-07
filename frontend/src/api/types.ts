@@ -153,6 +153,43 @@ export interface ImpactAssessmentSummary {
   createdAt: string
 }
 
+/**
+ * One persisted breakdown row of an assessment detail response.
+ * Mirrors backend `ImpactAssessmentBreakdownResponse` exactly.
+ * `changeType` stays a plain string: upstream it is a free-form
+ * trimmed value, not an enum, so narrowing it here would invent a
+ * guarantee the contract does not define.
+ */
+export interface ImpactAssessmentBreakdown {
+  changeImpactId: string
+  conceptCode: string
+  changeType: string
+  systemNormalized: number
+  systemBand: ImpactBand
+  systemRulesVersion: number
+  effectiveSensitivity: number
+  personalizedNormalized: number
+  personalizedBand: ImpactBand
+  personalizationRulesVersion: number
+}
+
+/**
+ * `GET /api/v1/me/impact-assessments/{assessmentId}`. The persisted
+ * summary facts plus the ordered breakdown rows; unknown or foreign
+ * ids answer `404`.
+ */
+export interface ImpactAssessmentDetail {
+  id: string
+  policyId: string
+  versionNumber: number
+  previousVersionNumber: number
+  aggregateScore: number
+  aggregateBand: ImpactBand
+  personalizationRulesVersion: number
+  createdAt: string
+  breakdowns: ImpactAssessmentBreakdown[]
+}
+
 /** `GET /api/v1/me/recommendations`. */
 export interface RecommendationSummary {
   id: string

@@ -16,6 +16,7 @@ export const ROUTES = {
   policies: '/app/policies',
   policyDetail: '/app/policies/:policyId',
   assessments: '/app/assessments',
+  assessmentDetail: '/app/assessments/:assessmentId',
   privacy: '/app/privacy',
   activity: '/app/activity',
 } as const
@@ -32,4 +33,11 @@ export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
  */
 export function policyDetailPath(policyId: string): string {
   return `/app/policies/${encodeURIComponent(policyId)}`
+}
+
+/**
+ * Builds an assessment detail path with a runtime id.
+ */
+export function assessmentDetailPath(assessmentId: string): string {
+  return `/app/assessments/${encodeURIComponent(assessmentId)}`
 }

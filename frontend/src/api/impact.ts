@@ -1,5 +1,10 @@
 import { apiRequest } from './client'
-import type { ImpactAssessmentSummary, ImpactSummary, PageParams } from './types'
+import type {
+  ImpactAssessmentDetail,
+  ImpactAssessmentSummary,
+  ImpactSummary,
+  PageParams,
+} from './types'
 
 /**
  * `GET /api/v1/me/impact-summary` — the single aggregate object backing the
@@ -22,4 +27,19 @@ export function listImpactAssessments(
     query: { ...params },
     signal,
   })
+}
+
+/**
+ * `GET /api/v1/me/impact-assessments/{assessmentId}` — one persisted
+ * assessment with its ordered score breakdown. Unknown or foreign ids
+ * answer `404` and never reveal whether the row exists.
+ */
+export function getImpactAssessment(
+  assessmentId: string,
+  signal?: AbortSignal,
+): Promise<ImpactAssessmentDetail> {
+  return apiRequest<ImpactAssessmentDetail>(
+    `/api/v1/me/impact-assessments/${assessmentId}`,
+    { signal },
+  )
 }

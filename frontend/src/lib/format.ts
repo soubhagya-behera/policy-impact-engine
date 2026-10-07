@@ -1,7 +1,6 @@
 import type {
   ImpactBand,
   ImpactSummary,
-  PolicyChangeType,
   PolicyStatus,
 } from '../api/types'
 
@@ -54,7 +53,7 @@ export function statusLabel(status: PolicyStatus): string {
 }
 
 /** Human label for a persisted change type, e.g. `MODIFIED` -> `Modified`. */
-export function changeTypeLabel(changeType: PolicyChangeType): string {
+export function changeTypeLabel(changeType: string): string {
   switch (changeType) {
     case 'ADDED':
       return 'Added'
