@@ -3,6 +3,7 @@ import { listPolicies } from '../../api/policies'
 import { PageContainer } from '../../components/layout/PageContainer'
 import { StatFigure } from '../../components/ui/Layout'
 import { useAsyncData } from '../../hooks/useAsyncData'
+import { maxImpactScoreDisplay } from '../../lib/format'
 import type { ImpactSummary, Policy } from '../../api/types'
 import { HeroSection } from './HeroSection'
 import { LatestImpactSection } from './LatestImpactSection'
@@ -52,7 +53,9 @@ export function DashboardPage() {
           />
           <StatFigure
             value={
-              summary.isInitialLoading ? '—' : (summary.data?.maxAggregateScore ?? 0)
+              summary.isInitialLoading
+                ? '—'
+                : maxImpactScoreDisplay(summary.data)
             }
             label="Highest impact score"
             tone="info"

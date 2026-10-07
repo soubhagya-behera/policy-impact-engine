@@ -7,7 +7,7 @@ import {
 } from '../../components/ui/AsyncState'
 import { Section } from '../../components/ui/Layout'
 import { StatusChip } from '../../components/ui/StatusChip'
-import { policyDetailPath } from '../../app/routes'
+import { policyDetailPath, ROUTES } from '../../app/routes'
 import { displayUrl, formatRelativeTime, statusLabel } from '../../lib/format'
 import type { AsyncState } from '../../hooks/useAsyncData'
 import type { Policy } from '../../api/types'
@@ -41,7 +41,7 @@ export function PoliciesSection({ state }: { state: AsyncState<Policy[]> }) {
         <EmptyState
           title="No policies yet"
           description="Add the URL of a policy document you want to track and the engine will watch it for changes."
-          action={<LinkButton to="/app/policies">Add a policy</LinkButton>}
+          action={<LinkButton to={ROUTES.policies}>Add a policy</LinkButton>}
         />
       ) : null}
 

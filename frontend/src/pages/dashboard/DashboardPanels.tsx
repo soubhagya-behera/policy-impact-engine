@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { listNotifications } from '../../api/notifications'
 import { listRecommendations } from '../../api/recommendations'
 import {
@@ -7,6 +8,7 @@ import {
 } from '../../components/ui/AsyncState'
 import { Section } from '../../components/ui/Layout'
 import { StatusChip } from '../../components/ui/StatusChip'
+import { policyDetailPath } from '../../app/routes'
 import { useAsyncData } from '../../hooks/useAsyncData'
 import {
   actionKindLabel,
@@ -114,22 +116,24 @@ export function NotificationsPanel() {
       {state.data && state.data.length > 0 ? (
         <ul className="divide-y divide-line border-y border-line">
           {state.data.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-col gap-2 py-5 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <p className="font-body text-base text-ink">
-                  Version {item.versionNumber} detected
-                </p>
-                <p className="mt-1 font-body text-sm text-ink-ghost">
-                  {formatRelativeTime(item.createdAt)}
-                </p>
-              </div>
-              <StatusChip
-                label={item.read ? 'Read' : 'New'}
-                tone={item.read ? 'neutral' : 'positive'}
-              />
+            <li key={item.id} className="py-5">
+              <Link
+                to={policyDetailPath(item.policyId)}
+                className="flex flex-col gap-2 py-1 transition-colors duration-150 ease-standard sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="font-body text-base text-ink">
+                    Version {item.versionNumber} detected
+                  </p>
+                  <p className="mt-1 font-body text-sm text-ink-ghost">
+                    {formatRelativeTime(item.createdAt)}
+                  </p>
+                </div>
+                <StatusChip
+                  label={item.read ? 'Read' : 'New'}
+                  tone={item.read ? 'neutral' : 'positive'}
+                />
+              </Link>
             </li>
           ))}
         </ul>

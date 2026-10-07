@@ -1,4 +1,4 @@
-import type { ImpactBand, PolicyStatus } from '../api/types'
+import type { ImpactBand, ImpactSummary, PolicyStatus } from '../api/types'
 
 /**
  * Presentation helpers shared across pages. Kept out of components so band
@@ -114,4 +114,20 @@ export function formatRelativeTime(iso: string | null): string {
 /** Strips the scheme for display so a long URL never overflows its cell. */
 export function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+}
+
+/**
+ * Highest measured aggregate score for the headline figure.
+ *
+ * The backend reports `maxAggregateScore: 0` for a user with no
+ * assessments at all — a non-measurement, not a real score — so an
+ * empty summary (or no summary yet) renders as an em dash rather than
+ * a misleading zero. A genuine measured zero (assessments exist) still
+ * renders as `0`.
+ */
+export function maxImpactScoreDisplay(
+  summary: ImpactSummary | null | undefined,
+): number | string {
+  if (!summary || summary.totalAssessments === 0) return '—'
+  return summary.maxAggregateScore
 }

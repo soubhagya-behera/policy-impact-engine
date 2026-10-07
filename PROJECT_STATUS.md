@@ -1984,3 +1984,51 @@ redirect URIs (local + Render backend); Render `GOOGLE_CLIENT_ID` /
 `app.google.frontend-base-url`. No commit/push performed.
 - Phase 18-B is now complete.
 Wait for explicit instruction before beginning new work.
+
+## Phase 18-C — Dashboard Functionality (COMPLETE)
+
+The `/app` dashboard was audited request-by-request against the
+backend contracts and is fully real-data driven; no new backend
+endpoint, store, or infrastructure was needed or added.
+
+- Audit result: every dashboard request already used the correct
+authenticated endpoint with matching DTOs (`GET /api/v1/policies`,
+`GET /api/v1/me/impact-summary`, `GET /api/v1/me/recommendations`,
+`GET /api/v1/me/notifications`); panels load independently through
+`useAsyncData` (one failure never blanks the dashboard); auth flows
+through the centralized client (no manual tokens, no second refresh
+mechanism).
+- Fixes (frontend only): the "Highest impact score" figure rendered
+the backend's empty-user `maxAggregateScore: 0` as a real score —
+it now renders an em dash until at least one assessment exists
+(new tested `maxImpactScoreDisplay` helper in `lib/format.ts`; a
+genuine measured zero still renders as `0`); the policies
+empty-state link uses the typed `ROUTES.policies`; notification
+rows are now real links to their policy detail page
+(`policyDetailPath`, no new route).
+- Real end-to-end verification against local backend + database
+(test account, no mocks): empty dashboard (all four feeds honest
+empty, score figure em dash); registered `https://example.com/`
+(201) and ran a live manual check (`FIRST_VERSION`); dashboard
+shows the policy with impact/recommendations/notifications still
+honestly empty. Then registered `https://httpbin.org/uuid` and
+checked twice: `FIRST_VERSION` → `NEW_VERSION` produced a real
+`NONE`-band assessment (score 0), one `NONE_REQUIRED` closure
+recommendation, and zero notifications (emission is
+actionable-only) — the full pipeline rendering real state,
+including the measured-zero score figure.
+- Failure states verified: backend unreachable → per-panel
+`NetworkError` message with retry; 401 flows through centralized
+handling; empty DB / policies-without-impact / empty feeds all
+render distinct honest empty states; validation/duplicate/refresh/
+logout paths probed live (19-step sequence, all expected codes).
+- Accessibility preserved (semantic headings, real links, live
+regions, text+shape status — never color-only); responsive classes
+unchanged (no layout change; notification link reuses the existing
+flex rhythm; `StatusChip` is a plain span, no nested interactive).
+- Frontend: `npm test` 11/11 (4 new for the score rule),
+`npm run lint` clean, `npm run build` clean. No backend changes,
+so no backend test run was required beyond the standing 1346 green.
+- No commit/push performed.
+- Phase 18-C is now complete.
+Wait for explicit instruction before beginning new work.
