@@ -5,6 +5,7 @@ import { ActivityPage } from '../pages/activity/ActivityPage'
 import { LoginPage } from '../pages/auth/LoginPage'
 import { GoogleCallbackPage } from '../pages/auth/GoogleCallbackPage'
 import { RegisterPage } from '../pages/auth/RegisterPage'
+import { AssessmentsPage } from '../pages/assessments/AssessmentsPage'
 import { DashboardPage } from '../pages/dashboard/DashboardPage'
 import { HomePage } from '../pages/HomePage'
 import { NotFoundPage } from '../pages/NotFoundPage'
@@ -43,6 +44,7 @@ export function AppRoutes() {
         <Route index element={<DashboardPage />} />
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="policies/:policyId" element={<PolicyDetailPage />} />
+        <Route path="assessments" element={<AssessmentsPage />} />
         <Route path="privacy" element={<PrivacyPage />} />
         <Route path="activity" element={<ActivityPage />} />
       </Route>

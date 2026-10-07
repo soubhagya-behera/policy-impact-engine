@@ -17,6 +17,7 @@ export interface NavItem {
 export const PRIMARY_NAV: readonly NavItem[] = [
   { to: '/app', label: 'Overview' },
   { to: '/app/policies', label: 'Policies' },
+  { to: '/app/assessments', label: 'Assessments' },
   { to: '/app/privacy', label: 'Privacy Profile' },
   { to: '/app/activity', label: 'Activity' },
 ]

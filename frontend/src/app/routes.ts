@@ -15,6 +15,7 @@ export const ROUTES = {
   app: '/app',
   policies: '/app/policies',
   policyDetail: '/app/policies/:policyId',
+  assessments: '/app/assessments',
   privacy: '/app/privacy',
   activity: '/app/activity',
 } as const
