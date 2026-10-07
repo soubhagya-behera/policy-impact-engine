@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { isApiError, toErrorMessage } from '../../api/errors'
 import { useAuth } from '../../auth/AuthContext'
@@ -39,6 +39,13 @@ export function GoogleCallbackPage() {
 
   const code = searchParams.get('code')
 
+  // StrictMode mounts this effect twice in development. The completion
+  // code is single-use server-side, so the exchange must be initiated
+  // exactly once per code: the ref is set synchronously before the
+  // async work starts, which makes the second mount a no-op instead of
+  // a duplicate POST that would (correctly) answer 401.
+  const submittedCodeRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (status === 'authenticated') return
     if (!code) {
@@ -46,6 +53,8 @@ export function GoogleCallbackPage() {
       setIsCompleting(false)
       return
     }
+    if (submittedCodeRef.current === code) return
+    submittedCodeRef.current = code
     let cancelled = false
     void (async () => {
       try {
