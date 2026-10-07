@@ -3,6 +3,7 @@ import type { ImpactSummary } from '../api/types'
 import {
   changeTypeLabel,
   formatBytes,
+  formatDateTime,
   formatDurationMs,
   maxImpactScoreDisplay,
 } from './format'
@@ -88,5 +89,21 @@ describe('changeTypeLabel', () => {
     expect(changeTypeLabel('ADDED')).toBe('Added')
     expect(changeTypeLabel('REMOVED')).toBe('Removed')
     expect(changeTypeLabel('MODIFIED')).toBe('Modified')
+  })
+})
+
+describe('formatDateTime', () => {
+  it('renders the null representation for missing timestamps', () => {
+    expect(formatDateTime(null)).toBe('—')
+  })
+
+  it('renders an invalid timestamp as missing', () => {
+    expect(formatDateTime('not-a-timestamp')).toBe('—')
+  })
+
+  it('renders a real timestamp as a non-empty date', () => {
+    const rendered = formatDateTime('2026-10-07T10:00:00Z')
+    expect(rendered).not.toBe('—')
+    expect(rendered).toContain('2026')
   })
 })

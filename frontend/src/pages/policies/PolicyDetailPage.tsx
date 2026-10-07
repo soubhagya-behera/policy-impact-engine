@@ -399,6 +399,16 @@ export function PolicyDetailPage() {
                     {formatDateTime(data.latestCheck.startedAt)}
                   </time>
                 </p>
+                <p className="mt-3 font-body text-sm text-ink-ghost">
+                  Next check:{' '}
+                  {data.nextCheckAt ? (
+                    <time dateTime={data.nextCheckAt}>
+                      {formatDateTime(data.nextCheckAt)}
+                    </time>
+                  ) : (
+                    '—'
+                  )}
+                </p>
               </div>
             ) : (
               <EmptyState
