@@ -370,6 +370,18 @@ export function PolicyDetailPage() {
                     ? `${bandLabel(data.latestImpact.band)} (${data.latestImpact.aggregateScore})`
                     : 'Not assessed yet'}
                 </dd>
+                {data.latestImpact ? (
+                  <dd className="mt-1 font-body text-sm text-ink-ghost">
+                    Assessed:{' '}
+                    {data.latestImpact.assessedAt ? (
+                      <time dateTime={data.latestImpact.assessedAt}>
+                        {formatDateTime(data.latestImpact.assessedAt)}
+                      </time>
+                    ) : (
+                      '—'
+                    )}
+                  </dd>
+                ) : null}
               </div>
             </dl>
           </Section>
