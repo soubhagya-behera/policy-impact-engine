@@ -3,6 +3,7 @@ import type {
   CreatePolicyRequest,
   PageParams,
   Policy,
+  PolicyChangeRecord,
   PolicyCheckHistoryEntry,
   PolicyCheckResult,
   PolicyOverview,
@@ -80,6 +81,23 @@ export function listPolicyVersions(
 ): Promise<PolicyVersionSummary[]> {
   return apiRequest<PolicyVersionSummary[]>(
     `/api/v1/policies/${policyId}/versions`,
+    { query: { ...params }, signal },
+  )
+}
+
+/**
+ * Change history, windowed by `page`/`size` like every other feed.
+ * Transport order is the backend's transition order (successor
+ * version ascending, then document position ascending) and is
+ * rendered verbatim — never resorted client-side.
+ */
+export function listPolicyChanges(
+  policyId: string,
+  params: PageParams = {},
+  signal?: AbortSignal,
+): Promise<PolicyChangeRecord[]> {
+  return apiRequest<PolicyChangeRecord[]>(
+    `/api/v1/policies/${policyId}/changes`,
     { query: { ...params }, signal },
   )
 }

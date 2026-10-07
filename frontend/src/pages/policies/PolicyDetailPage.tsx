@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { archivePolicy, getPolicyOverview, listPolicyChecks, listPolicyVersions, reactivatePolicy, runPolicyCheck } from '../../api/policies'
+import { archivePolicy, getPolicyOverview, listPolicyChanges, listPolicyChecks, listPolicyVersions, reactivatePolicy, runPolicyCheck } from '../../api/policies'
 import { isApiError, toErrorMessage } from '../../api/errors'
 import {
   EmptyState,
@@ -15,13 +15,14 @@ import { useAsyncData } from '../../hooks/useAsyncData'
 import {
   bandColor,
   bandLabel,
+  changeTypeLabel,
   formatBytes,
   formatDateTime,
   formatDurationMs,
   statusLabel,
 } from '../../lib/format'
 import { ROUTES } from '../../app/routes'
-import type { PolicyCheckHistoryEntry, PolicyCheckResult, PolicyOverview, PolicyStatus, PolicyVersionSummary } from '../../api/types'
+import type { PolicyChangeRecord, PolicyCheckHistoryEntry, PolicyCheckResult, PolicyOverview, PolicyStatus, PolicyVersionSummary } from '../../api/types'
 
 /**
  * Lifecycle action available for a policy status.
@@ -122,6 +123,12 @@ export function PolicyDetailPage() {
 
   const versions = useAsyncData<PolicyVersionSummary[]>(
     (signal) => listPolicyVersions(policyId ?? '', { page: 0, size: 10 }, signal),
+    (data) => data.length === 0,
+    { enabled: Boolean(policyId) },
+  )
+
+  const changes = useAsyncData<PolicyChangeRecord[]>(
+    (signal) => listPolicyChanges(policyId ?? '', { page: 0, size: 10 }, signal),
     (data) => data.length === 0,
     { enabled: Boolean(policyId) },
   )
@@ -483,6 +490,62 @@ export function PolicyDetailPage() {
                     <p className="mt-3 break-all font-body text-sm text-ink-ghost">
                       {version.contentHash}
                     </p>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </Section>
+
+          <Section
+            title="Changes"
+            description="Detected differences between successive snapshots, in transition order."
+            actions={
+              <Button
+                variant="secondary"
+                onClick={changes.reload}
+                isLoading={changes.status === 'loading'}
+              >
+                Refresh
+              </Button>
+            }
+          >
+            {changes.isInitialLoading ? <SkeletonRows rows={3} /> : null}
+
+            {changes.status === 'error' && changes.errorMessage ? (
+              <ErrorState message={changes.errorMessage} onRetry={changes.reload} />
+            ) : null}
+
+            {changes.isEmpty ? (
+              <EmptyState
+                title="No changes recorded yet"
+                description="When two observed snapshots differ, each detected difference is listed here."
+              />
+            ) : null}
+
+            {changes.data && changes.data.length > 0 ? (
+              <ul className="divide-y divide-line border-y border-line">
+                {changes.data.map((change) => (
+                  <li key={change.id} className="py-5">
+                    <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+                      <span className="font-body text-base text-ink">
+                        {changeTypeLabel(change.changeType)}
+                      </span>
+                      <span className="font-body text-sm text-ink-ghost">
+                        v{change.versionNumber} · position {change.changeOrder}
+                      </span>
+                    </div>
+                    {change.oldText ? (
+                      <p className="mt-3 font-body text-sm text-ink-ghost">
+                        <span className="type-label text-ink-faint">Removed: </span>
+                        {change.oldText}
+                      </p>
+                    ) : null}
+                    {change.newText ? (
+                      <p className="mt-3 font-body text-sm text-ink">
+                        <span className="type-label text-ink-faint">Added: </span>
+                        {change.newText}
+                      </p>
+                    ) : null}
                   </li>
                 ))}
               </ul>

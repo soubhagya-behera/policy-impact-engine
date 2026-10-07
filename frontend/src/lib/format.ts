@@ -1,4 +1,9 @@
-import type { ImpactBand, ImpactSummary, PolicyStatus } from '../api/types'
+import type {
+  ImpactBand,
+  ImpactSummary,
+  PolicyChangeType,
+  PolicyStatus,
+} from '../api/types'
 
 /**
  * Presentation helpers shared across pages. Kept out of components so band
@@ -46,6 +51,20 @@ export function bandDescription(band: ImpactBand): string {
 
 export function statusLabel(status: PolicyStatus): string {
   return status === 'ACTIVE' ? 'Active' : 'Archived'
+}
+
+/** Human label for a persisted change type, e.g. `MODIFIED` -> `Modified`. */
+export function changeTypeLabel(changeType: PolicyChangeType): string {
+  switch (changeType) {
+    case 'ADDED':
+      return 'Added'
+    case 'REMOVED':
+      return 'Removed'
+    case 'MODIFIED':
+      return 'Modified'
+    default:
+      return changeType
+  }
 }
 
 /** Tailwind text colour per policy status. */

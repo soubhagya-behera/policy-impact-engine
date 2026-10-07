@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ImpactSummary } from '../api/types'
-import { formatBytes, formatDurationMs, maxImpactScoreDisplay } from './format'
+import {
+  changeTypeLabel,
+  formatBytes,
+  formatDurationMs,
+  maxImpactScoreDisplay,
+} from './format'
 
 /**
  * The backend reports `maxAggregateScore: 0` for a user with no
@@ -75,5 +80,13 @@ describe('formatDurationMs', () => {
   it('renders measured durations', () => {
     expect(formatDurationMs(0)).toBe('0 ms')
     expect(formatDurationMs(1500)).toBe('1,500 ms')
+  })
+})
+
+describe('changeTypeLabel', () => {
+  it('labels every persisted change type', () => {
+    expect(changeTypeLabel('ADDED')).toBe('Added')
+    expect(changeTypeLabel('REMOVED')).toBe('Removed')
+    expect(changeTypeLabel('MODIFIED')).toBe('Modified')
   })
 })

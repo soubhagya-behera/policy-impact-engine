@@ -3,6 +3,7 @@ import { registerAuthBridge } from './client'
 import {
   archivePolicy,
   listPolicyChecks,
+  listPolicyChanges,
   listPolicyVersions,
   reactivatePolicy,
   runPolicyCheck,
@@ -239,6 +240,64 @@ describe('listPolicyVersions', () => {
     expect(versions[0]).toMatchObject({
       versionNumber: 1,
       contentHash: 'deadbeef',
+    })
+  })
+})
+
+describe('listPolicyChanges', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    registerAuthBridge(null)
+  })
+
+  it('sends an authenticated GET with page and size', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              id: 'change-1',
+              changeType: 'ADDED',
+              oldText: null,
+              newText: 'new clause text',
+              changeOrder: 0,
+              versionNumber: 2,
+              newVersionId: 'version-2',
+            },
+          ]),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const changes = await listPolicyChanges(
+      'policy-id-6',
+      { page: 0, size: 10 },
+    )
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url).toContain('/api/v1/policies/policy-id-6/changes')
+    expect(url).toContain('page=0')
+    expect(url).toContain('size=10')
+    expect(init.method ?? 'GET').toBe('GET')
+    expect(new Headers(init.headers).get('Authorization')).toBe(
+      'Bearer test-access-token',
+    )
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      changeType: 'ADDED',
+      oldText: null,
+      newText: 'new clause text',
+      changeOrder: 0,
+      versionNumber: 2,
     })
   })
 })

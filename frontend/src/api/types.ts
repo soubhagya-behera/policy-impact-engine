@@ -275,3 +275,23 @@ export interface PolicyVersionSummary {
   contentHash: string
   observedAt: string
 }
+
+export const POLICY_CHANGE_TYPES = ['ADDED', 'REMOVED', 'MODIFIED'] as const
+export type PolicyChangeType = (typeof POLICY_CHANGE_TYPES)[number]
+
+/**
+ * `GET /api/v1/policies/{policyId}/changes` row. Mirrors backend
+ * `ChangeRecordResponse` exactly: identity, change type, the old/new
+ * texts, the zero-based document position, and the successor version
+ * reference. `oldText` is null for `ADDED` rows and `newText` is null
+ * for `REMOVED` rows; both are present for `MODIFIED` rows.
+ */
+export interface PolicyChangeRecord {
+  id: string
+  changeType: PolicyChangeType
+  oldText: string | null
+  newText: string | null
+  changeOrder: number
+  versionNumber: number
+  newVersionId: string
+}
