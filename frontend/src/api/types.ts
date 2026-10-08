@@ -204,6 +204,22 @@ export interface RecommendationSummary {
   createdAt: string
 }
 
+/** `GET /api/v1/me/recommendations/{recommendationId}`. */
+export interface RecommendationDetail {
+  id: string
+  assessmentId: string
+  policyId: string
+  versionNumber: number
+  ruleId: string
+  ruleOrder: number
+  actionKind: RecommendationActionKind
+  conceptCode: string | null
+  personalizedNormalized: number
+  personalizedBand: ImpactBand
+  recommendationRulesVersion: number
+  createdAt: string
+}
+
 /** `GET /api/v1/me/notifications`. */
 export interface Notification {
   id: string
