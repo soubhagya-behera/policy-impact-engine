@@ -1,7 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ApiError, NetworkError } from '../../api/errors'
+import { registerAuthBridge } from '../../api/client'
 import { recommendationDetailPath } from '../../app/routes'
 import { formatRelativeTime } from '../../lib/format'
-import { recommendationMetaLine } from './DashboardPanels'
+import type { Notification } from '../../api/types'
+import {
+  canMarkNotificationRead,
+  markReadAndReload,
+  recommendationMetaLine,
+  toMarkReadError,
+} from './DashboardPanels'
 
 /**
  * Recommendation row secondary line.
@@ -43,5 +51,137 @@ describe('recommendation detail link', () => {
     expect(recommendationDetailPath('rec-1')).toBe(
       '/app/recommendations/rec-1',
     )
+  })
+})
+
+/**
+ * Notification mark-as-read row action.
+ *
+ * Unread rows offer the action; read rows never show it. Marking
+ * posts once and reloads the feed only on success, so the row flips
+ * to `Read`; failures surface the backend's message and skip the
+ * reload.
+ */
+describe('canMarkNotificationRead', () => {
+  function notificationWith(
+    overrides: Partial<Notification> = {},
+  ): Notification {
+    return {
+      id: 'notif-1',
+      assessmentId: 'assessment-1',
+      policyId: 'policy-1',
+      versionNumber: 2,
+      createdAt: '2026-10-07T10:00:00Z',
+      readAt: null,
+      read: false,
+      ...overrides,
+    }
+  }
+
+  it('offers the action for an unread notification', () => {
+    expect(canMarkNotificationRead(notificationWith())).toBe(true)
+  })
+
+  it('hides the action for an already-read notification', () => {
+    expect(
+      canMarkNotificationRead(
+        notificationWith({ read: true, readAt: '2026-10-07T11:00:00Z' }),
+      ),
+    ).toBe(false)
+  })
+})
+
+describe('toMarkReadError', () => {
+  it('surfaces backend failures verbatim', () => {
+    expect(
+      toMarkReadError(
+        new ApiError(404, '/api/v1/me/notifications/missing/read', {
+          title: 'Not Found',
+          detail: 'Notification not found',
+        }),
+      ),
+    ).toContain('Notification not found')
+  })
+
+  it('surfaces network failures as connectivity guidance', () => {
+    expect(toMarkReadError(new NetworkError('down'))).toContain(
+      'Could not reach the server',
+    )
+  })
+})
+
+describe('markReadAndReload', () => {
+  function stubBridge() {
+    registerAuthBridge({
+      getAccessToken: () => 'test-access-token',
+      getRefreshToken: () => null,
+      hasExpiredAccessToken: () => false,
+      refresh: () => Promise.resolve(null),
+      invalidate: () => undefined,
+    })
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    registerAuthBridge(null)
+  })
+
+  it('posts the mark-read and reloads the feed on success', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: 'notif-1',
+            assessmentId: 'assessment-1',
+            policyId: 'policy-1',
+            versionNumber: 2,
+            createdAt: '2026-10-07T10:00:00Z',
+            readAt: '2026-10-07T11:00:00Z',
+            read: true,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const reload = vi.fn()
+
+    await markReadAndReload('notif-1', reload)
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url.endsWith('/api/v1/me/notifications/notif-1/read')).toBe(true)
+    expect(init.method).toBe('POST')
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('skips the reload and propagates the failure on error', async () => {
+    stubBridge()
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            title: 'Internal Server Error',
+            detail: 'Database unavailable',
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const reload = vi.fn()
+
+    await expect(markReadAndReload('notif-1', reload)).rejects.toMatchObject({
+      status: 500,
+    })
+    expect(reload).not.toHaveBeenCalled()
   })
 })

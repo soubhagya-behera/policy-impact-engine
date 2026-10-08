@@ -1,11 +1,14 @@
 import { Link } from 'react-router-dom'
-import { listNotifications } from '../../api/notifications'
+import { useState } from 'react'
+import { toErrorMessage } from '../../api/errors'
+import { listNotifications, markNotificationRead } from '../../api/notifications'
 import { listRecommendations } from '../../api/recommendations'
 import {
   EmptyState,
   ErrorState,
   SkeletonRows,
 } from '../../components/ui/AsyncState'
+import { Button } from '../../components/ui/Button'
 import { Section } from '../../components/ui/Layout'
 import { StatusChip } from '../../components/ui/StatusChip'
 import { policyDetailPath, recommendationDetailPath } from '../../app/routes'
@@ -100,6 +103,36 @@ export function RecommendationsPanel() {
   )
 }
 
+/**
+ * Whether a notification row offers the mark-read action: unread rows
+ * only. Read rows never show it.
+ */
+export function canMarkNotificationRead(notification: Notification): boolean {
+  return !notification.read
+}
+
+/**
+ * User-facing message for a failed mark-read. Surfaces the backend's
+ * own message verbatim, including connectivity guidance for network
+ * failures.
+ */
+export function toMarkReadError(error: unknown): string {
+  return toErrorMessage(error)
+}
+
+/**
+ * Marks one notification read, then reloads the feed so the row flips
+ * to `Read`. The reload runs only after the POST succeeds; failures
+ * propagate to the caller for display and never trigger a reload.
+ */
+export async function markReadAndReload(
+  notificationId: string,
+  reload: () => void,
+): Promise<void> {
+  await markNotificationRead(notificationId)
+  reload()
+}
+
 export function NotificationsPanel() {
   const state = useAsyncData<Notification[]>(
     (signal) => listNotifications({ page: 0, size: 5 }, signal),
@@ -107,6 +140,27 @@ export function NotificationsPanel() {
   )
 
   const unreadCount = state.data?.filter((item) => !item.read).length ?? 0
+  const [pendingIds, setPendingIds] = useState<string[]>([])
+  const [markFailure, setMarkFailure] = useState<{
+    notificationId: string
+    message: string
+  } | null>(null)
+
+  async function handleMarkRead(notificationId: string): Promise<void> {
+    if (pendingIds.includes(notificationId)) return
+    setPendingIds((ids) => [...ids, notificationId])
+    setMarkFailure(null)
+    try {
+      await markReadAndReload(notificationId, state.reload)
+    } catch (error) {
+      setMarkFailure({
+        notificationId,
+        message: toMarkReadError(error),
+      })
+    } finally {
+      setPendingIds((ids) => ids.filter((id) => id !== notificationId))
+    }
+  }
 
   return (
     <Section
@@ -131,27 +185,46 @@ export function NotificationsPanel() {
         />
       ) : null}
 
+      {markFailure ? (
+        <ErrorState
+          message={markFailure.message}
+          onRetry={() => void handleMarkRead(markFailure.notificationId)}
+        />
+      ) : null}
+
       {state.data && state.data.length > 0 ? (
         <ul className="divide-y divide-line border-y border-line">
           {state.data.map((item) => (
-            <li key={item.id} className="py-5">
+            <li
+              key={item.id}
+              className="flex flex-col gap-2 py-5 sm:flex-row sm:items-center sm:justify-between"
+            >
               <Link
                 to={policyDetailPath(item.policyId)}
-                className="flex flex-col gap-2 py-1 transition-colors duration-150 ease-standard sm:flex-row sm:items-center sm:justify-between"
+                className="min-w-0 flex-1 py-1 transition-colors duration-150 ease-standard"
               >
-                <div className="min-w-0">
-                  <p className="font-body text-base text-ink">
-                    Version {item.versionNumber} detected
-                  </p>
-                  <p className="mt-1 font-body text-sm text-ink-ghost">
-                    {formatRelativeTime(item.createdAt)}
-                  </p>
-                </div>
+                <p className="font-body text-base text-ink">
+                  Version {item.versionNumber} detected
+                </p>
+                <p className="mt-1 font-body text-sm text-ink-ghost">
+                  {formatRelativeTime(item.createdAt)}
+                </p>
+              </Link>
+              <div className="flex items-center gap-3">
                 <StatusChip
                   label={item.read ? 'Read' : 'New'}
                   tone={item.read ? 'neutral' : 'positive'}
                 />
-              </Link>
+                {canMarkNotificationRead(item) ? (
+                  <Button
+                    variant="ghost"
+                    isLoading={pendingIds.includes(item.id)}
+                    onClick={() => void handleMarkRead(item.id)}
+                  >
+                    Mark as read
+                  </Button>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>
