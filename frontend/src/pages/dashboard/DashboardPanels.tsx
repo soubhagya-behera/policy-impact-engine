@@ -8,7 +8,7 @@ import {
 } from '../../components/ui/AsyncState'
 import { Section } from '../../components/ui/Layout'
 import { StatusChip } from '../../components/ui/StatusChip'
-import { policyDetailPath } from '../../app/routes'
+import { policyDetailPath, recommendationDetailPath } from '../../app/routes'
 import { useAsyncData } from '../../hooks/useAsyncData'
 import {
   actionKindLabel,
@@ -71,25 +71,27 @@ export function RecommendationsPanel() {
       {state.data && state.data.length > 0 ? (
         <ul className="divide-y divide-line border-y border-line">
           {state.data.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-col gap-2 py-5 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <p className="font-body text-base text-ink">
-                  {actionKindLabel(item.actionKind)}
-                </p>
-                <p className="mt-1 font-body text-sm text-ink-ghost">
-                  {recommendationMetaLine(item.conceptCode, item.createdAt)}
-                </p>
-              </div>
-              <StatusChip
-                label={bandLabel(item.personalizedBand)}
-                tone={
-                  item.personalizedBand === 'NONE' ? 'neutral' : 'accent'
-                }
-                className={bandColor(item.personalizedBand)}
-              />
+            <li key={item.id} className="py-5">
+              <Link
+                to={recommendationDetailPath(item.id)}
+                className="flex flex-col gap-2 py-1 transition-colors duration-150 ease-standard sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="font-body text-base text-ink">
+                    {actionKindLabel(item.actionKind)}
+                  </p>
+                  <p className="mt-1 font-body text-sm text-ink-ghost">
+                    {recommendationMetaLine(item.conceptCode, item.createdAt)}
+                  </p>
+                </div>
+                <StatusChip
+                  label={bandLabel(item.personalizedBand)}
+                  tone={
+                    item.personalizedBand === 'NONE' ? 'neutral' : 'accent'
+                  }
+                  className={bandColor(item.personalizedBand)}
+                />
+              </Link>
             </li>
           ))}
         </ul>

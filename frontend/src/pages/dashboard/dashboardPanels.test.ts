@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { recommendationDetailPath } from '../../app/routes'
 import { formatRelativeTime } from '../../lib/format'
 import { recommendationMetaLine } from './DashboardPanels'
 
@@ -29,5 +30,18 @@ describe('recommendationMetaLine', () => {
 
     expect(line).not.toContain('null')
     expect(line).toBe(formatRelativeTime(createdAt))
+  })
+})
+
+/**
+ * Dashboard recommendation rows link to the recommendation detail
+ * page. Each row targets `/app/recommendations/{id}` for its own row
+ * id, matching the authenticated detail route.
+ */
+describe('recommendation detail link', () => {
+  it('generates the detail path for the row recommendation id', () => {
+    expect(recommendationDetailPath('rec-1')).toBe(
+      '/app/recommendations/rec-1',
+    )
   })
 })
