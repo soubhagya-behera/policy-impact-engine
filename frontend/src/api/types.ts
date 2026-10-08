@@ -197,7 +197,7 @@ export interface RecommendationSummary {
   ruleId: string
   ruleOrder: number
   actionKind: RecommendationActionKind
-  conceptCode: string
+  conceptCode: string | null
   personalizedNormalized: number
   personalizedBand: ImpactBand
   recommendationRulesVersion: number

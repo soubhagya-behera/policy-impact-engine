@@ -28,6 +28,22 @@ import type { Notification, RecommendationSummary } from '../../api/types'
  * away cancels in-flight work rather than resolving into an unmounted tree.
  */
 
+/**
+ * Secondary line under a recommendation row: `CONCEPT · age`.
+ *
+ * `conceptCode` is `null` only for the assessment-level `NONE_REQUIRED`
+ * closure row, which belongs to no single concept — rendering it directly
+ * would print a literal "null". The closure row keeps the relative age on
+ * its own; its headline already reads "No action required".
+ */
+export function recommendationMetaLine(
+  conceptCode: string | null,
+  createdAt: string,
+): string {
+  const age = formatRelativeTime(createdAt)
+  return conceptCode ? `${conceptCode} · ${age}` : age
+}
+
 export function RecommendationsPanel() {
   const state = useAsyncData<RecommendationSummary[]>(
     (signal) => listRecommendations({ page: 0, size: 5 }, signal),
@@ -64,7 +80,7 @@ export function RecommendationsPanel() {
                   {actionKindLabel(item.actionKind)}
                 </p>
                 <p className="mt-1 font-body text-sm text-ink-ghost">
-                  {item.conceptCode} · {formatRelativeTime(item.createdAt)}
+                  {recommendationMetaLine(item.conceptCode, item.createdAt)}
                 </p>
               </div>
               <StatusChip
