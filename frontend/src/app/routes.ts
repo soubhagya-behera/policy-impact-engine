@@ -17,6 +17,7 @@ export const ROUTES = {
   policyDetail: '/app/policies/:policyId',
   assessments: '/app/assessments',
   assessmentDetail: '/app/assessments/:assessmentId',
+  recommendationDetail: '/app/recommendations/:recommendationId',
   privacy: '/app/privacy',
   activity: '/app/activity',
 } as const
@@ -40,4 +41,11 @@ export function policyDetailPath(policyId: string): string {
  */
 export function assessmentDetailPath(assessmentId: string): string {
   return `/app/assessments/${encodeURIComponent(assessmentId)}`
+}
+
+/**
+ * Builds a recommendation detail path with a runtime id.
+ */
+export function recommendationDetailPath(recommendationId: string): string {
+  return `/app/recommendations/${encodeURIComponent(recommendationId)}`
 }

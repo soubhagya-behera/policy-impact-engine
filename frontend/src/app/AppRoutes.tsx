@@ -13,6 +13,7 @@ import { NotFoundPage } from '../pages/NotFoundPage'
 import { PoliciesPage } from '../pages/policies/PoliciesPage'
 import { PolicyDetailPage } from '../pages/policies/PolicyDetailPage'
 import { PrivacyPage } from '../pages/privacy/PrivacyPage'
+import { RecommendationDetailPage } from '../pages/recommendations/RecommendationDetailPage'
 import { ROUTES } from './routes'
 
 /**
@@ -49,6 +50,10 @@ export function AppRoutes() {
         <Route
           path="assessments/:assessmentId"
           element={<AssessmentDetailPage />}
+        />
+        <Route
+          path="recommendations/:recommendationId"
+          element={<RecommendationDetailPage />}
         />
         <Route path="privacy" element={<PrivacyPage />} />
         <Route path="activity" element={<ActivityPage />} />
