@@ -10,7 +10,7 @@ import {
 import { Button } from '../../components/ui/Button'
 import { PageHeader, Section } from '../../components/ui/Layout'
 import { useAsyncData } from '../../hooks/useAsyncData'
-import { formatDateTime } from '../../lib/format'
+import { auditEventLabel, formatDateTime } from '../../lib/format'
 import type { AuditEvent } from '../../api/types'
 
 /**
@@ -134,7 +134,7 @@ export function ActivityPage() {
                 >
                   <div className="min-w-0">
                     <p className="font-body text-base text-ink">
-                      {event.eventType}
+                      {auditEventLabel(event.eventType)}
                     </p>
                     <p className="mt-1 truncate font-body text-sm text-ink-ghost">
                       {event.resourceType}

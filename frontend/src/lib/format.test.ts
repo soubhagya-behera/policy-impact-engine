@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ImpactSummary } from '../api/types'
 import {
+  auditEventLabel,
   changeTypeLabel,
   formatBytes,
   formatDateTime,
@@ -89,6 +90,40 @@ describe('changeTypeLabel', () => {
     expect(changeTypeLabel('ADDED')).toBe('Added')
     expect(changeTypeLabel('REMOVED')).toBe('Removed')
     expect(changeTypeLabel('MODIFIED')).toBe('Modified')
+  })
+})
+
+describe('auditEventLabel', () => {
+  it('labels every code in the backend AuditEventType enum', () => {
+    expect(auditEventLabel('AUTH_USER_REGISTERED')).toBe('Account created')
+    expect(auditEventLabel('AUTH_LOGIN_SUCCEEDED')).toBe('Signed in')
+    expect(auditEventLabel('POLICY_REGISTERED')).toBe('Policy registered')
+    expect(auditEventLabel('POLICY_OWNER_ASSIGNED')).toBe(
+      'Policy ownership assigned',
+    )
+    expect(auditEventLabel('PRIVACY_PREFERENCE_UPSERTED')).toBe(
+      'Privacy preference updated',
+    )
+    expect(auditEventLabel('PRIVACY_PREFERENCE_DELETED')).toBe(
+      'Privacy preference removed',
+    )
+    expect(auditEventLabel('POLICY_ARCHIVED')).toBe('Policy archived')
+    expect(auditEventLabel('AUTH_LOGOUT_SUCCEEDED')).toBe('Signed out')
+    expect(auditEventLabel('AUTH_LOGOUT_ALL_SUCCEEDED')).toBe(
+      'Signed out of all sessions',
+    )
+    expect(auditEventLabel('AUTH_REFRESH_REUSE_DETECTED')).toBe(
+      'Session token reuse detected',
+    )
+    expect(auditEventLabel('AUTH_GOOGLE_LOGIN_SUCCEEDED')).toBe(
+      'Signed in with Google',
+    )
+    expect(auditEventLabel('POLICY_REACTIVATED')).toBe('Policy reactivated')
+  })
+
+  it('falls back to the original value for unknown future codes', () => {
+    expect(auditEventLabel('SOME_FUTURE_EVENT')).toBe('SOME_FUTURE_EVENT')
+    expect(auditEventLabel('')).toBe('')
   })
 })
 

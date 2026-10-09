@@ -87,6 +87,43 @@ export function actionKindLabel(actionKind: string): string {
 }
 
 /**
+ * Human label for an audit event code, e.g. `AUTH_LOGIN_SUCCEEDED` ->
+ * `Signed in`. Covers every code in the backend `AuditEventType` enum;
+ * unknown future codes fall back to their original value so the feed never
+ * renders a blank title for an event the backend can produce.
+ */
+export function auditEventLabel(eventType: string): string {
+  switch (eventType) {
+    case 'AUTH_USER_REGISTERED':
+      return 'Account created'
+    case 'AUTH_LOGIN_SUCCEEDED':
+      return 'Signed in'
+    case 'POLICY_REGISTERED':
+      return 'Policy registered'
+    case 'POLICY_OWNER_ASSIGNED':
+      return 'Policy ownership assigned'
+    case 'PRIVACY_PREFERENCE_UPSERTED':
+      return 'Privacy preference updated'
+    case 'PRIVACY_PREFERENCE_DELETED':
+      return 'Privacy preference removed'
+    case 'POLICY_ARCHIVED':
+      return 'Policy archived'
+    case 'AUTH_LOGOUT_SUCCEEDED':
+      return 'Signed out'
+    case 'AUTH_LOGOUT_ALL_SUCCEEDED':
+      return 'Signed out of all sessions'
+    case 'AUTH_REFRESH_REUSE_DETECTED':
+      return 'Session token reuse detected'
+    case 'AUTH_GOOGLE_LOGIN_SUCCEEDED':
+      return 'Signed in with Google'
+    case 'POLICY_REACTIVATED':
+      return 'Policy reactivated'
+    default:
+      return eventType
+  }
+}
+
+/**
  * Absolute date/time in the viewer's locale. Rendered inside `<time>` with a
  * machine-readable `dateTime` attribute supplied by the caller.
  */
