@@ -3,3 +3,8 @@
 # in Git-ignored files. Copy .env.example to .env and edit there.
 .env
 !.env.example
+
+# Generated dependencies (never commit). The frontend has its own
+# .gitignore for frontend/node_modules; this covers any stray
+# root-level install or tool cache (e.g. vitest .vite output).
+node_modules/
